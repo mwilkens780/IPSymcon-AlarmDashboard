@@ -1,0 +1,10 @@
+{
+    "id": "{91CED6BA-A7CB-42B2-BB40-4D6E2F929329}",
+    "author": "Martin Wilkens",
+    "name": "Alarm Dashboard",
+    "description": "Dashboard fuer die Hausalarmanlage: beliebig viele Alarmzonen (IPS-Kernmodul 'Alerting', automatisch erkannt) mit Scharf-/Unscharf-Schalter und Alarmstatus, optionale Anzeige der Somfy/TaHoma-Alarmanlage (Modus, Einbruchserkennung) sowie ein Batterie-Sammelstatus mit Liste der schwachen Geraete.",
+    "version": "1.0",
+    "build": 1,
+    "date": 1787950779,
+    "url": "https://github.com/mwilkens780/IPSymcon-AlarmDashboard"
+}

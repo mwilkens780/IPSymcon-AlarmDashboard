@@ -1,0 +1,12 @@
+{
+    "id": "{541EAF25-2909-4427-B452-CDE79B0A0990}",
+    "name": "Alarm Dashboard",
+    "type": 3,
+    "vendor": "Martin Wilkens",
+    "aliases": [],
+    "dependencies": [],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "ALD"
+}

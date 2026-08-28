@@ -1,0 +1,58 @@
+{
+  "elements": [
+    {
+      "type": "List",
+      "name": "zones",
+      "caption": "Alarmzonen",
+      "rowCount": 4,
+      "add": true,
+      "delete": true,
+      "columns": [
+        { "caption": "Name", "name": "name", "width": "200px", "add": "", "edit": { "type": "ValidationTextBox" } },
+        { "caption": "Zone (Alerting-Instanz)", "name": "variable", "width": "auto", "add": 0, "edit": { "type": "SelectObject", "validObjectTypes": [1] } }
+      ],
+      "values": []
+    },
+    {
+      "type": "Label",
+      "caption": "Jede Instanz mit den Datenpunkten 'Active' und 'Alert' wird als Alarmzone erkannt (z.B. das IPS-Kernmodul 'Alerting') -- scharf/unscharf lässt sich direkt hier umschalten."
+    },
+    {
+      "type": "SelectInstance",
+      "name": "somfy_instance",
+      "caption": "Somfy-Alarmanlage (optional, nur Anzeige)"
+    },
+    {
+      "type": "Label",
+      "caption": "Zeigt Modus, Ziel-Modus und Einbruchserkennung an. Scharf-/Unscharfschalten ist bewusst nicht eingebaut, solange die TaHoma-Befehlsnamen dafür nicht sicher verifiziert sind."
+    },
+    {
+      "type": "SelectInstance",
+      "name": "battery_monitor",
+      "caption": "Batterie-Monitor (optional)"
+    },
+    {
+      "type": "Label",
+      "caption": "Eine ProfileMonitor-Instanz mit den Datenpunkten 'Warning' und 'Devices_With_Empty_Battery'."
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "update_interval",
+      "caption": "Aktualisierungsintervall (Sekunden)",
+      "minimum": 10,
+      "suffix": "s"
+    }
+  ],
+  "actions": [
+    {
+      "type": "Button",
+      "caption": "Jetzt aktualisieren",
+      "onClick": "ALD_Refresh($id);"
+    }
+  ],
+  "status": [
+    { "code": 102, "icon": "active",   "caption": "Aktiv" },
+    { "code": 200, "icon": "error",    "caption": "Fehler – Details im IPS-Log" },
+    { "code": 201, "icon": "inactive", "caption": "Nicht konfiguriert – mindestens eine Zone, die Somfy-Anlage oder den Batterie-Monitor hinzufügen" }
+  ]
+}
