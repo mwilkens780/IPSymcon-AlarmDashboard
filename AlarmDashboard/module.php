@@ -3,18 +3,20 @@
 declare(strict_types=1);
 
 /**
- * Zeigt und steuert die Hausalarm-Komponenten in einer Kachel: beliebig
- * viele Alarmzonen (IPS-Kernmodul "Alerting" -- erkannt an den Datenpunkten
- * Active/Alert/ActiveSensors, unabhaengig von der konkreten Instanz-GUID),
- * optional die Somfy/TaHoma-Alarmanlage (nur Anzeige) und der
- * Batterie-Sammelstatus (ProfileMonitor).
+ * Zeigt die Hausalarm-Komponenten in einer Kachel: beliebig viele
+ * Statuspunkte (freie Liste, z.B. die per "HomeMatic Systemvariablen"-
+ * Instanz aus der CCU3 gespiegelten Alarm-/Fenster-/Wasseralarm-Variablen)
+ * sowie der Batterie-Sammelstatus (ProfileMonitor).
  *
- * Die Somfy-Anlage selbst (scharf/unscharf schalten) wird bewusst NICHT
- * gesteuert: TaHoma-Alarme laufen nur ueber eine generische
- * TAHOMA_SendCommand()-Funktion ohne dokumentierte Befehlsnamen fuers
- * Scharfschalten, und ein Blindversuch gegen eine echte Alarmanlage waere
- * unverantwortlich. Sobald die Befehle bekannt sind, kann das ergaenzt
- * werden (siehe README).
+ * Bewusst NICHT eingebaut: eine eigene, parallele Alarmlogik (wie das
+ * IPS-Kernmodul "Alerting") und Scharf-/Unscharf-Steuerung. Die Alarmlogik
+ * lebt bereits vollstaendig in den CCU3-Programmen; die "HomeMatic
+ * Systemvariablen"-Instanz spiegelt deren Zustand bidirektional nach IPS
+ * (verifiziert). Dieses Modul liest diese gespiegelten Variablen nur --
+ * welche davon konkret das Scharf-/Unscharfschalten ausloest, ist noch
+ * nicht sicher identifiziert, ein Blindversuch waere bei einer echten
+ * Alarmanlage unverantwortlich. Sobald geklaert, kann eine Steuerung
+ * ergaenzt werden (siehe README).
  */
 class AlarmDashboard extends IPSModule
 {
@@ -22,8 +24,7 @@ class AlarmDashboard extends IPSModule
     {
         parent::Create();
 
-        $this->RegisterPropertyString('zones', '[]');
-        $this->RegisterPropertyInteger('somfy_instance', 0);
+        $this->RegisterPropertyString('statusItems', '[]');
         $this->RegisterPropertyInteger('battery_monitor', 0);
         $this->RegisterPropertyInteger('update_interval', 30);
 
@@ -35,10 +36,8 @@ class AlarmDashboard extends IPSModule
     {
         parent::ApplyChanges();
 
-        $zones = json_decode($this->ReadPropertyString('zones'), true) ?: [];
-        $hasAnything = count($zones) > 0
-            || $this->ReadPropertyInteger('somfy_instance') > 0
-            || $this->ReadPropertyInteger('battery_monitor') > 0;
+        $items = json_decode($this->ReadPropertyString('statusItems'), true) ?: [];
+        $hasAnything = count($items) > 0 || $this->ReadPropertyInteger('battery_monitor') > 0;
 
         if (!$hasAnything) {
             $this->SetStatus(201);
@@ -73,10 +72,6 @@ class AlarmDashboard extends IPSModule
     public function RequestAction($Ident, $Value): void
     {
         try {
-            if (strpos($Ident, 'zone_') === 0) {
-                $this->forwardZoneAction((int) substr($Ident, strlen('zone_')), (bool) $Value);
-                return;
-            }
             if ($Ident === 'battery_rescan') {
                 $this->forwardBatteryRescan();
                 return;
@@ -84,23 +79,6 @@ class AlarmDashboard extends IPSModule
             $this->LogMessage("AlarmDashboard RequestAction: unknown ident {$Ident}", KL_WARNING);
         } catch (\Throwable $e) {
             $this->LogMessage('AlarmDashboard RequestAction ' . $Ident . ': ' . $e->getMessage(), KL_ERROR);
-        }
-    }
-
-    /** Scharf-/Unscharfschalten einer einzelnen Alarmzone -- schreibt direkt auf deren eigene "Active"-Variable. */
-    private function forwardZoneAction(int $index, bool $active): void
-    {
-        $zones = json_decode($this->ReadPropertyString('zones'), true) ?: [];
-        if (!isset($zones[$index]['variable'])) {
-            return;
-        }
-        $nodeId = (int) $zones[$index]['variable'];
-        if ($nodeId <= 0 || !@IPS_InstanceExists($nodeId)) {
-            return;
-        }
-        $activeId = $this->varIdByIdent($nodeId, 'Active');
-        if ($activeId > 0) {
-            RequestAction($activeId, $active);
         }
     }
 
@@ -122,69 +100,41 @@ class AlarmDashboard extends IPSModule
     private function collectData(): array
     {
         return [
-            'zones'   => $this->collectZones(),
-            'somfy'   => $this->collectSomfy(),
+            'items'   => $this->collectStatusItems(),
             'battery' => $this->collectBattery(),
             'updated' => date('d.m. H:i'),
         ];
     }
 
     /**
-     * Eine Zone gilt als solche, sobald die Ziel-Instanz sowohl "Active"
-     * als auch "Alert" hat -- damit funktioniert das unabhaengig von der
-     * konkreten Modul-GUID des IPS-Kernmoduls "Alerting".
+     * Frei konfigurierbare Liste beliebiger Variablen (z.B. die von der
+     * CCU3 gespiegelten Alarm-Systemvariablen). Typ steuert nur die
+     * Darstellung -- Alarm/Fenster nehmen an, dass "true"/"Ein" den
+     * auffaelligen Zustand bedeutet (Standardpolung); falls eine konkrete
+     * CCU3-Variable umgekehrt gepolt ist, faellt das beim ersten Live-Test
+     * auf und kann dann nachgebessert werden.
      */
-    private function collectZones(): array
+    private function collectStatusItems(): array
     {
         $out = [];
-        foreach (json_decode($this->ReadPropertyString('zones'), true) ?: [] as $i => $row) {
-            $nodeId = (int) ($row['variable'] ?? 0);
-            if ($nodeId <= 0 || !@IPS_InstanceExists($nodeId)) {
+        foreach (json_decode($this->ReadPropertyString('statusItems'), true) ?: [] as $i => $row) {
+            $varId = (int) ($row['variable'] ?? 0);
+            if ($varId <= 0 || !@IPS_VariableExists($varId)) {
                 continue;
             }
-            $activeId = $this->varIdByIdent($nodeId, 'Active');
-            $alertId  = $this->varIdByIdent($nodeId, 'Alert');
-            if ($activeId <= 0 || $alertId <= 0) {
-                continue;
-            }
-            $sensorsId      = $this->varIdByIdent($nodeId, 'ActiveSensors');
-            $delayId        = $this->varIdByIdent($nodeId, 'DelayDisplay');
-            $triggerDelayId = $this->varIdByIdent($nodeId, 'TriggerDelayDisplay');
-
+            $type = (string) ($row['type'] ?? 'text');
             $nameOverride = ($row['name'] ?? '') !== '' ? $row['name'] : null;
+            $raw = GetValue($varId);
+
             $out[] = [
-                'ident'         => 'zone_' . $i,
-                'name'          => $nameOverride ?? $this->deviceName($nodeId),
-                'active'        => (bool) $this->readVarById($activeId),
-                'alert'         => (bool) $this->readVarById($alertId),
-                'activeSensors' => $sensorsId > 0 ? (string) $this->readVarById($sensorsId) : '',
-                'delay'         => $delayId > 0 ? (string) $this->readVarById($delayId) : '',
-                'triggerDelay'  => $triggerDelayId > 0 ? (string) $this->readVarById($triggerDelayId) : '',
+                'ident' => 'item_' . $i,
+                'name'  => $nameOverride ?? $this->deviceName($varId),
+                'type'  => $type,
+                'bool'  => in_array($type, ['alarm', 'window'], true) ? (bool) $raw : null,
+                'raw'   => $raw,
             ];
         }
         return $out;
-    }
-
-    /** Nur Anzeige -- siehe Klassenkommentar, warum hier bewusst nicht gesteuert wird. */
-    private function collectSomfy(): ?array
-    {
-        $nodeId = $this->ReadPropertyInteger('somfy_instance');
-        if ($nodeId <= 0 || !@IPS_InstanceExists($nodeId)) {
-            return null;
-        }
-        $currentId   = $this->varIdByIdent($nodeId, 'internal_CurrentAlarmModeState');
-        $targetId    = $this->varIdByIdent($nodeId, 'internal_TargetAlarmModeState');
-        $intrusionId = $this->varIdByIdent($nodeId, 'internal_IntrusionDetectedState');
-        $delayId     = $this->varIdByIdent($nodeId, 'internal_AlarmDelayState');
-        if ($currentId <= 0) {
-            return null;
-        }
-        return [
-            'current'   => (string) $this->readVarById($currentId),
-            'target'    => $targetId > 0 ? (string) $this->readVarById($targetId) : '',
-            'intrusion' => $intrusionId > 0 ? (string) $this->readVarById($intrusionId) : '',
-            'delay'     => $delayId > 0 ? (int) $this->readVarById($delayId) : 0,
-        ];
     }
 
     private function collectBattery(): ?array
@@ -214,16 +164,11 @@ class AlarmDashboard extends IPSModule
 
         $anyAlert = false;
         $alertNames = [];
-        foreach ($d['zones'] as $zone) {
-            if ($zone['alert']) {
+        foreach ($d['items'] as $item) {
+            if ($item['type'] === 'alarm' && $item['bool'] === true) {
                 $anyAlert = true;
-                $alertNames[] = $zone['name'];
+                $alertNames[] = $item['name'];
             }
-        }
-        $somfyIntrusion = $d['somfy'] !== null && $d['somfy']['intrusion'] === 'detected';
-        if ($somfyIntrusion) {
-            $anyAlert = true;
-            $alertNames[] = $this->Translate('Somfy-Alarmanlage');
         }
 
         $alarmBanner = '';
@@ -232,15 +177,14 @@ class AlarmDashboard extends IPSModule
             $alarmBanner = '<div class="alarm-banner">🚨 ' . $this->Translate('ALARM') . ': ' . $namesEsc . '</div>';
         }
 
-        $zonesHtml = '';
-        foreach ($d['zones'] as $zone) {
-            $zonesHtml .= $this->renderZoneTile($zone);
+        $itemsHtml = '';
+        foreach ($d['items'] as $item) {
+            $itemsHtml .= $this->renderStatusItem($item);
         }
-        $zonesBlock = $zonesHtml !== ''
-            ? '<div class="pv-block"><div class="pv-title">🛡️ ' . $this->Translate('Alarmzonen') . '</div><div class="tile-grid">' . $zonesHtml . '</div></div>'
+        $itemsBlock = $itemsHtml !== ''
+            ? '<div class="pv-block"><div class="pv-title">🛡️ ' . $this->Translate('Status') . '</div><div class="current-grid">' . $itemsHtml . '</div></div>'
             : '';
 
-        $somfyBlock = $this->renderSomfyPanel($d['somfy']);
         $batteryBlock = $this->renderBatteryPanel($d['battery']);
 
         $updatedEsc = htmlspecialchars($d['updated'], ENT_QUOTES);
@@ -261,25 +205,12 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 .badge-off{background:#1a2535;border-color:#2a3a50;color:#4a6a8a}
 .badge-on{background:#12405a;border-color:#2a7aa0;color:#7ec8f0}
 .badge-warn{background:#4a2010;border-color:#8a4020;color:#f08060}
-.status-row{display:flex;gap:6px;flex-wrap:wrap;flex:none}
 .current-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;flex:none}
-.tile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:none}
-.cur-tile{display:flex;flex-direction:column;gap:1px;background:#131f33;border-radius:8px;padding:6px 8px}
+.cur-tile{display:flex;flex-direction:column;gap:3px;background:#131f33;border-radius:8px;padding:6px 8px}
 .cur-label{font-size:10px;color:#4a6a8a;text-transform:uppercase;letter-spacing:.03em}
 .cur-value{font-size:15px;font-weight:700;color:#d0e8ff}
 .pv-block{display:flex;flex-direction:column;gap:8px;flex:none;background:#0f1c30;border-radius:10px;padding:8px}
 .pv-title{font-size:12px;font-weight:700;color:#d0e8ff}
-.toggle{position:relative;width:44px;height:24px;flex:none;display:inline-block}
-.toggle input{opacity:0;position:absolute;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}
-.toggle-track{position:absolute;inset:0;background:#1a2535;border:1px solid #2a3a50;border-radius:12px;transition:.15s}
-.toggle-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#8aa8c8;border-radius:50%;transition:.15s}
-.toggle input:checked ~ .toggle-track{background:#12405a;border-color:#2a7aa0}
-.toggle input:checked ~ .toggle-track .toggle-thumb{transform:translateX(20px);background:#7ec8f0}
-.zone-tile{display:flex;flex-direction:column;gap:6px;background:#131f33;border-radius:8px;padding:8px}
-.zone-head{display:flex;justify-content:space-between;align-items:center;gap:6px}
-.zone-name{font-size:12px;font-weight:600;color:#d0e8ff}
-.zone-sensors{font-size:10px;color:#f08060}
-.zone-delay{font-size:10px;color:#4a6a8a}
 .alarm-banner{background:#5a1010;border:1px solid #b03030;color:#ffb0a0;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;flex:none;animation:alarm-pulse 1.4s ease-in-out infinite}
 @keyframes alarm-pulse{0%,100%{opacity:1}50%{opacity:.7}}
 .mini-btn{background:#1a2535;border:1px solid #2a3a50;color:#8aa8c8;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
@@ -293,8 +224,7 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 </div>
 
 {$alarmBanner}
-{$zonesBlock}
-{$somfyBlock}
+{$itemsBlock}
 {$batteryBlock}
 
 <script>
@@ -311,7 +241,7 @@ window.handleMessage = function(raw) {
   var val = msg.value;
   state = val;
   setText('updated', val.updated);
-  // Volle Neu-Darstellung (Alarm-Banner, Zonen, Somfy, Batterie) erfolgt
+  // Volle Neu-Darstellung (Alarm-Banner, Statuspunkte, Batterie) erfolgt
   // beim naechsten Kachel-Reload -- bewusst kein Live-Patch dieser Felder,
   // gleiches Prinzip wie bei Sensoren/Rauchmeldern im Room Dashboard.
 };
@@ -321,78 +251,39 @@ window.handleMessage = function(raw) {
 HTML;
     }
 
-    private function renderZoneTile(array $zone): string
+    private function renderStatusItem(array $item): string
     {
-        $ident = $zone['ident'];
-        $nameEsc = htmlspecialchars($zone['name'], ENT_QUOTES);
-        $checked = $zone['active'] ? ' checked' : '';
+        $nameEsc = htmlspecialchars($item['name'], ENT_QUOTES);
 
-        $alertBadge = $zone['alert']
-            ? '<span class="badge badge-warn">' . $this->Translate('ALARM') . '</span>'
-            : '<span class="badge badge-off">OK</span>';
-
-        $sensorsHtml = ($zone['alert'] && $zone['activeSensors'] !== '')
-            ? '<div class="zone-sensors">' . htmlspecialchars($zone['activeSensors'], ENT_QUOTES) . '</div>'
-            : '';
-
-        $delayParts = [];
-        if ($zone['delay'] !== '' && $zone['delay'] !== '0:00') {
-            $delayParts[] = $this->Translate('Aktivierung in') . ' ' . htmlspecialchars($zone['delay'], ENT_QUOTES);
+        switch ($item['type']) {
+            case 'alarm':
+                $on = $item['bool'] === true;
+                $cls = $on ? 'badge-warn' : 'badge-off';
+                $text = $on ? $this->Translate('ALARM') : 'OK';
+                return $this->renderBadgeTile($nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
+            case 'window':
+                $on = $item['bool'] === true;
+                $cls = $on ? 'badge-warn' : 'badge-off';
+                $text = $on ? $this->Translate('Offen') : $this->Translate('Geschlossen');
+                return $this->renderBadgeTile($nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
+            case 'timestamp':
+                $ts = (int) $item['raw'];
+                $text = $ts > 0 ? date('d.m.Y H:i', $ts) : '–';
+                return $this->renderValueTile($nameEsc, htmlspecialchars($text, ENT_QUOTES));
+            default:
+                $text = trim((string) $item['raw']);
+                return $this->renderValueTile($nameEsc, htmlspecialchars($text !== '' ? $text : '–', ENT_QUOTES));
         }
-        if ($zone['triggerDelay'] !== '' && $zone['triggerDelay'] !== '0:00') {
-            $delayParts[] = $this->Translate('Alarm in') . ' ' . htmlspecialchars($zone['triggerDelay'], ENT_QUOTES);
-        }
-        $delayHtml = $delayParts !== [] ? '<div class="zone-delay">' . implode(' · ', $delayParts) . '</div>' : '';
-
-        return <<<HTML
-<div class="zone-tile">
-  <div class="zone-head">
-    <span class="zone-name">{$nameEsc}</span>
-    <label class="toggle"><input type="checkbox"{$checked} onchange="requestAction('{$ident}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
-  </div>
-  <div class="status-row">{$alertBadge}</div>
-  {$sensorsHtml}
-  {$delayHtml}
-</div>
-HTML;
     }
 
-    private function renderSomfyPanel(?array $somfy): string
+    private function renderBadgeTile(string $nameEsc, string $badgeClass, string $textEsc): string
     {
-        if ($somfy === null) {
-            return '';
-        }
+        return "<div class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span class='badge {$badgeClass}' style='align-self:flex-start'>{$textEsc}</span></div>";
+    }
 
-        $modeLabels = [
-            'off'          => $this->Translate('Unscharf'),
-            'notDetected'  => $this->Translate('Kein Einbruch erkannt'),
-            'detected'     => $this->Translate('EINBRUCH ERKANNT'),
-        ];
-
-        $currentLabel = $modeLabels[$somfy['current']] ?? $somfy['current'];
-        $currentEsc = htmlspecialchars($currentLabel, ENT_QUOTES);
-
-        $targetHtml = '';
-        if ($somfy['target'] !== '' && $somfy['target'] !== $somfy['current']) {
-            $targetLabel = $modeLabels[$somfy['target']] ?? $somfy['target'];
-            $targetEsc = htmlspecialchars($targetLabel, ENT_QUOTES);
-            $delaySuffix = $somfy['delay'] > 0 ? ' (' . $somfy['delay'] . 's)' : '';
-            $targetHtml = '<div class="zone-delay">' . $this->Translate('wird gestellt auf') . ': ' . $targetEsc . $delaySuffix . '</div>';
-        }
-
-        $intrusionEsc = htmlspecialchars($modeLabels[$somfy['intrusion']] ?? $somfy['intrusion'], ENT_QUOTES);
-        $intrusionCls = $somfy['intrusion'] === 'detected' ? 'badge-warn' : 'badge-off';
-
-        return <<<HTML
-<div class="pv-block">
-  <div class="pv-title">🏠 {$this->Translate('Somfy-Alarmanlage')}</div>
-  <div class="current-grid">
-    <div class='cur-tile'><span class='cur-label'>{$this->Translate('Modus')}</span><span class='cur-value'>{$currentEsc}</span></div>
-    <div class='cur-tile'><span class='cur-label'>{$this->Translate('Einbruch')}</span><span class='badge {$intrusionCls}'>{$intrusionEsc}</span></div>
-  </div>
-  {$targetHtml}
-</div>
-HTML;
+    private function renderValueTile(string $nameEsc, string $valueEsc): string
+    {
+        return "<div class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span class='cur-value'>{$valueEsc}</span></div>";
     }
 
     private function renderBatteryPanel(?array $battery): string

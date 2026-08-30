@@ -2,6 +2,10 @@
 
 Dashboard für die Hausalarmanlage, im selben dunklen Kachel-Stil wie die anderen Dashboards (Room Dashboard, SunRiser 8, Heating/Energy/Weather Dashboard). Eine Instanz für die gesamte Anlage.
 
+## Architektur-Entscheidung
+
+Die eigentliche Alarmlogik (Sensoren auswerten, scharf-/unscharf schalten, Sirene ansteuern) läuft vollständig als Programme auf der HomeMatic CCU3 -- das bleibt bewusst die einzige Quelle der Wahrheit. Dieses Modul baut **keine** eigene, parallele Alarmlogik in IPS auf (ursprünglich mit dem IPS-Kernmodul "Alerting" geplant, dann verworfen), sondern liest nur die Systemvariablen, die eine "HomeMatic Systemvariablen"-Instanz bereits bidirektional aus der CCU3 nach IPS spiegelt. Grund: zwei unabhängige Zustandsmaschinen synchron zu halten (ohne Verzug oder Verlust bei Aktivierung/Deaktivierung/Alarmierung) ist ein Risiko, das sich bei einer echten Alarmanlage nicht lohnt -- ein Anzeige-/Fernbedienungs-Layer über der bestehenden, bewährten CCU3-Logik ist die robustere Wahl.
+
 ## Installation
 
 Modulverwaltung → + → URL eintragen:
@@ -11,17 +15,22 @@ https://github.com/mwilkens780/IPSymcon-AlarmDashboard
 
 ## Konfiguration
 
-- **Alarmzonen**: frei erweiterbare Liste. Als Zone zählt jede Instanz mit den Datenpunkten `Active` und `Alert` -- das trifft automatisch auf das IPS-Kernmodul "Alerting" zu, unabhängig von der genauen Modul-Version. Scharf-/Unscharfschalten passiert direkt über den Schalter in der Kachel (schreibt auf die `Active`-Variable der Zone).
-- **Somfy-Alarmanlage** (optional): zeigt aktuellen Modus, Ziel-Modus (falls gerade eine Umschaltung läuft, inkl. Sekunden-Countdown) und Einbruchserkennung der TaHoma/Somfy-Instanz an.
+- **Statuspunkte**: frei erweiterbare Liste beliebiger Variablen -- typischerweise die von der "HomeMatic Systemvariablen"-Instanz gespiegelten CCU3-Alarmvariablen (z.B. `Alarm intern`, `Alarm extern`, `Alarm Feuer`, `Alarm Wasser`, `Alarm Batterie`, `Fensteröffnung oben/unten`, `Wasseralarm Raum`). Typ steuert nur die Darstellung:
+  - **Alarm (Ja/Nein)**: roter ALARM-Badge bei "Ein", löst den pulsierenden Banner oben aus.
+  - **Fenster/Tür (Auf/Zu)**: nur Auf/Zu-Anzeige, kein Alarm-Banner.
+  - **Zeitstempel**: als Datum/Uhrzeit formatiert.
+  - **Text**: unverändert angezeigt.
+  
+  Die Polung (Ein = Alarm) folgt der üblichen Konvention -- falls eine konkrete CCU3-Variable umgekehrt gepolt ist, fällt das beim ersten Live-Test auf.
 - **Batterie-Monitor** (optional): eine ProfileMonitor-Instanz -- zeigt den Sammelstatus, die Anzahl betroffener Geräte und bei Warnung die vom Monitor selbst gelieferte Geräteliste. Button "Jetzt prüfen" stößt eine manuelle Neuprüfung an.
 
-## Bewusst nicht eingebaut: Somfy scharf-/unscharfschalten
+## Bewusst nicht eingebaut: Scharf-/Unscharfschalten aus IPS heraus
 
-Die Somfy-Anlage (TaHoma) lässt sich technisch nur über eine generische `TAHOMA_SendCommand(instanzID, befehl, parameter)`-Funktion steuern -- ohne fest hinterlegte Befehlsnamen fürs Scharfschalten, und ohne ein bestehendes Skript im System, das diese schon mal erfolgreich aufgerufen hätte. Auf gut Glück Befehle gegen eine echte Alarmanlage zu testen ist riskant (Fehlalarm oder ungeschütztes Haus), deshalb zeigt dieses Modul den Somfy-Status nur an. Sobald die exakten Befehlsnamen bekannt sind (z.B. durch Somfy-App-Recherche oder einen vorsichtigen, begleiteten Live-Test), lässt sich die Steuerung ergänzen.
+Welche der gespiegelten CCU3-Systemvariablen genau das Scharf-/Unscharfschalten auslöst (nicht nur den Alarmzustand anzeigt), ist noch nicht sicher identifiziert. Auf gut Glück eine Schreibaktion gegen eine echte Alarmanlage zu bauen ist riskant. Sobald klar ist, welche Variable dafür zuständig ist, lässt sich ein Schalter ergänzen -- die Schreibrichtung (IPS → CCU3) funktioniert bei dieser Instanz nachweislich.
 
 ## Alarm-Banner
 
-Sobald irgendeine Zone `Alert = true` meldet oder die Somfy-Anlage einen Einbruch erkennt, erscheint oben in der Kachel ein rot pulsierender Banner mit den betroffenen Zonen -- unübersehbar, unabhängig vom Scroll-Zustand der übrigen Kachel.
+Sobald ein als "Alarm" typisierter Statuspunkt auf "Ein" steht, erscheint oben in der Kachel ein rot pulsierender Banner mit den betroffenen Punkten -- unübersehbar, unabhängig vom Scroll-Zustand der übrigen Kachel.
 
 ## Kachel einrichten
 

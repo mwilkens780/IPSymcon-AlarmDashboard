@@ -2,29 +2,35 @@
   "elements": [
     {
       "type": "List",
-      "name": "zones",
-      "caption": "Alarmzonen",
-      "rowCount": 4,
+      "name": "statusItems",
+      "caption": "Statuspunkte",
+      "rowCount": 8,
       "add": true,
       "delete": true,
       "columns": [
-        { "caption": "Name", "name": "name", "width": "200px", "add": "", "edit": { "type": "ValidationTextBox" } },
-        { "caption": "Zone (Alerting-Instanz)", "name": "variable", "width": "auto", "add": 0, "edit": { "type": "SelectObject", "validObjectTypes": [1] } }
+        { "caption": "Name", "name": "name", "width": "180px", "add": "", "edit": { "type": "ValidationTextBox" } },
+        { "caption": "Variable", "name": "variable", "width": "200px", "add": 0, "edit": { "type": "SelectVariable" } },
+        {
+          "caption": "Typ",
+          "name": "type",
+          "width": "160px",
+          "add": "text",
+          "edit": {
+            "type": "Select",
+            "options": [
+              { "caption": "Alarm (Ja/Nein)", "value": "alarm" },
+              { "caption": "Fenster/Tür (Auf/Zu)", "value": "window" },
+              { "caption": "Zeitstempel", "value": "timestamp" },
+              { "caption": "Text", "value": "text" }
+            ]
+          }
+        }
       ],
       "values": []
     },
     {
       "type": "Label",
-      "caption": "Jede Instanz mit den Datenpunkten 'Active' und 'Alert' wird als Alarmzone erkannt (z.B. das IPS-Kernmodul 'Alerting') -- scharf/unscharf lässt sich direkt hier umschalten."
-    },
-    {
-      "type": "SelectInstance",
-      "name": "somfy_instance",
-      "caption": "Somfy-Alarmanlage (optional, nur Anzeige)"
-    },
-    {
-      "type": "Label",
-      "caption": "Zeigt Modus, Ziel-Modus und Einbruchserkennung an. Scharf-/Unscharfschalten ist bewusst nicht eingebaut, solange die TaHoma-Befehlsnamen dafür nicht sicher verifiziert sind."
+      "caption": "Beliebige Variablen, z.B. die per 'HomeMatic Systemvariablen'-Instanz aus der CCU3 gespiegelten Alarm-Systemvariablen (Alarm intern/extern, Alarm Feuer/Wasser/Batterie, Fensteröffnungen, ...). 'Alarm' zeigt bei 'Ein' einen roten ALARM-Badge und löst den Alarm-Banner oben aus; 'Fenster/Tür' zeigt nur Auf/Zu ohne Alarm-Banner."
     },
     {
       "type": "SelectInstance",
@@ -53,6 +59,6 @@
   "status": [
     { "code": 102, "icon": "active",   "caption": "Aktiv" },
     { "code": 200, "icon": "error",    "caption": "Fehler – Details im IPS-Log" },
-    { "code": 201, "icon": "inactive", "caption": "Nicht konfiguriert – mindestens eine Zone, die Somfy-Anlage oder den Batterie-Monitor hinzufügen" }
+    { "code": 201, "icon": "inactive", "caption": "Nicht konfiguriert – mindestens einen Statuspunkt oder den Batterie-Monitor hinzufügen" }
   ]
 }
