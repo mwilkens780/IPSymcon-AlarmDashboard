@@ -9,14 +9,12 @@ declare(strict_types=1);
  * sowie der Batterie-Sammelstatus (ProfileMonitor).
  *
  * Bewusst NICHT eingebaut: eine eigene, parallele Alarmlogik (wie das
- * IPS-Kernmodul "Alerting") und Scharf-/Unscharf-Steuerung. Die Alarmlogik
- * lebt bereits vollstaendig in den CCU3-Programmen; die "HomeMatic
- * Systemvariablen"-Instanz spiegelt deren Zustand bidirektional nach IPS
- * (verifiziert). Dieses Modul liest diese gespiegelten Variablen nur --
- * welche davon konkret das Scharf-/Unscharfschalten ausloest, ist noch
- * nicht sicher identifiziert, ein Blindversuch waere bei einer echten
- * Alarmanlage unverantwortlich. Sobald geklaert, kann eine Steuerung
- * ergaenzt werden (siehe README).
+ * IPS-Kernmodul "Alerting"). Die Alarmlogik lebt vollstaendig in den
+ * CCU3-Programmen; die "HomeMatic Systemvariablen"-Instanz spiegelt deren
+ * Zustand bidirektional nach IPS (verifiziert -- Schreiben von hier wirkt
+ * auf die CCU3 zurueck). Scharf-/Unscharfschalten laeuft ueber die
+ * gespiegelten Variablen "Alarm intern"/"Alarm extern" (vom Nutzer
+ * bestaetigt) -- als Statuspunkt-Typ "arm" konfigurierbar.
  */
 class AlarmDashboard extends IPSModule
 {
@@ -72,6 +70,10 @@ class AlarmDashboard extends IPSModule
     public function RequestAction($Ident, $Value): void
     {
         try {
+            if (strpos($Ident, 'item_') === 0) {
+                $this->forwardStatusItemAction((int) substr($Ident, strlen('item_')), (bool) $Value);
+                return;
+            }
             if ($Ident === 'battery_rescan') {
                 $this->forwardBatteryRescan();
                 return;
@@ -80,6 +82,25 @@ class AlarmDashboard extends IPSModule
         } catch (\Throwable $e) {
             $this->LogMessage('AlarmDashboard RequestAction ' . $Ident . ': ' . $e->getMessage(), KL_ERROR);
         }
+    }
+
+    /**
+     * Scharf-/Unscharfschalten -- nur fuer Statuspunkte vom Typ "arm"
+     * (z.B. "Alarm intern"/"Alarm extern"). Schreibt direkt auf die
+     * konfigurierte, von der CCU3 gespiegelte Variable; die Rueckrichtung
+     * (IPS -> CCU3) ist vom Nutzer bestaetigt.
+     */
+    private function forwardStatusItemAction(int $index, bool $value): void
+    {
+        $rows = json_decode($this->ReadPropertyString('statusItems'), true) ?: [];
+        if (!isset($rows[$index]['variable']) || ($rows[$index]['type'] ?? '') !== 'arm') {
+            return;
+        }
+        $varId = (int) $rows[$index]['variable'];
+        if ($varId <= 0 || !@IPS_VariableExists($varId)) {
+            return;
+        }
+        RequestAction($varId, $value);
     }
 
     /** Stoesst eine manuelle Neupruefung des Batterie-Monitors an. */
@@ -130,7 +151,7 @@ class AlarmDashboard extends IPSModule
                 'ident' => 'item_' . $i,
                 'name'  => $nameOverride ?? $this->deviceName($varId),
                 'type'  => $type,
-                'bool'  => in_array($type, ['alarm', 'window'], true) ? (bool) $raw : null,
+                'bool'  => in_array($type, ['alarm', 'window', 'arm'], true) ? (bool) $raw : null,
                 'raw'   => $raw,
             ];
         }
@@ -211,6 +232,12 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 .cur-value{font-size:15px;font-weight:700;color:#d0e8ff}
 .pv-block{display:flex;flex-direction:column;gap:8px;flex:none;background:#0f1c30;border-radius:10px;padding:8px}
 .pv-title{font-size:12px;font-weight:700;color:#d0e8ff}
+.toggle{position:relative;width:38px;height:22px;flex:none;display:inline-block}
+.toggle input{opacity:0;position:absolute;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}
+.toggle-track{position:absolute;inset:0;background:#1a2535;border:1px solid #2a3a50;border-radius:11px;transition:.15s}
+.toggle-thumb{position:absolute;top:1px;left:1px;width:16px;height:16px;background:#8aa8c8;border-radius:50%;transition:.15s}
+.toggle input:checked ~ .toggle-track{background:#12405a;border-color:#2a7aa0}
+.toggle input:checked ~ .toggle-track .toggle-thumb{transform:translateX(16px);background:#7ec8f0}
 .alarm-banner{background:#5a1010;border:1px solid #b03030;color:#ffb0a0;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;flex:none;animation:alarm-pulse 1.4s ease-in-out infinite}
 @keyframes alarm-pulse{0%,100%{opacity:1}50%{opacity:.7}}
 .mini-btn{background:#1a2535;border:1px solid #2a3a50;color:#8aa8c8;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
@@ -256,6 +283,19 @@ HTML;
         $nameEsc = htmlspecialchars($item['name'], ENT_QUOTES);
 
         switch ($item['type']) {
+            case 'arm':
+                $on = $item['bool'] === true;
+                $checked = $on ? ' checked' : '';
+                $text = $on ? $this->Translate('Scharf') : $this->Translate('Unscharf');
+                return <<<HTML
+<div class='cur-tile'>
+  <span class='cur-label'>{$nameEsc}</span>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+    <span class='cur-value' style="font-size:12px">{$text}</span>
+    <label class="toggle"><input type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+  </div>
+</div>
+HTML;
             case 'alarm':
                 $on = $item['bool'] === true;
                 $cls = $on ? 'badge-warn' : 'badge-off';

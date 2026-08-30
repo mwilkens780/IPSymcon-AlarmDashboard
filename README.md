@@ -15,18 +15,15 @@ https://github.com/mwilkens780/IPSymcon-AlarmDashboard
 
 ## Konfiguration
 
-- **Statuspunkte**: frei erweiterbare Liste beliebiger Variablen -- typischerweise die von der "HomeMatic Systemvariablen"-Instanz gespiegelten CCU3-Alarmvariablen (z.B. `Alarm intern`, `Alarm extern`, `Alarm Feuer`, `Alarm Wasser`, `Alarm Batterie`, `Fensteröffnung oben/unten`, `Wasseralarm Raum`). Typ steuert nur die Darstellung:
-  - **Alarm (Ja/Nein)**: roter ALARM-Badge bei "Ein", löst den pulsierenden Banner oben aus.
+- **Statuspunkte**: frei erweiterbare Liste beliebiger Variablen -- typischerweise die von der "HomeMatic Systemvariablen"-Instanz gespiegelten CCU3-Alarmvariablen (z.B. `Alarm intern`, `Alarm extern`, `Alarm Feuer`, `Alarm Wasser`, `Alarm Batterie`, `Fensteröffnung oben/unten`, `Wasseralarm Raum`). Typ steuert Darstellung und Verhalten:
+  - **Scharf/Unscharf (schaltbar)**: für die Aktivierungsvariablen `Alarm intern`/`Alarm extern` -- ein Schalter, der direkt auf die Variable schreibt und damit auf die CCU3 zurückwirkt.
+  - **Alarm (Ja/Nein)**: nur Anzeige, roter ALARM-Badge bei "Ein", löst den pulsierenden Banner oben aus.
   - **Fenster/Tür (Auf/Zu)**: nur Auf/Zu-Anzeige, kein Alarm-Banner.
   - **Zeitstempel**: als Datum/Uhrzeit formatiert.
   - **Text**: unverändert angezeigt.
-  
-  Die Polung (Ein = Alarm) folgt der üblichen Konvention -- falls eine konkrete CCU3-Variable umgekehrt gepolt ist, fällt das beim ersten Live-Test auf.
+
+  Die Polung (Ein = scharf/Alarm/offen) folgt der üblichen Konvention -- falls eine konkrete CCU3-Variable umgekehrt gepolt ist, fällt das beim ersten Live-Test auf.
 - **Batterie-Monitor** (optional): eine ProfileMonitor-Instanz -- zeigt den Sammelstatus, die Anzahl betroffener Geräte und bei Warnung die vom Monitor selbst gelieferte Geräteliste. Button "Jetzt prüfen" stößt eine manuelle Neuprüfung an.
-
-## Bewusst nicht eingebaut: Scharf-/Unscharfschalten aus IPS heraus
-
-Welche der gespiegelten CCU3-Systemvariablen genau das Scharf-/Unscharfschalten auslöst (nicht nur den Alarmzustand anzeigt), ist noch nicht sicher identifiziert. Auf gut Glück eine Schreibaktion gegen eine echte Alarmanlage zu bauen ist riskant. Sobald klar ist, welche Variable dafür zuständig ist, lässt sich ein Schalter ergänzen -- die Schreibrichtung (IPS → CCU3) funktioniert bei dieser Instanz nachweislich.
 
 ## Alarm-Banner
 

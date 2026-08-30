@@ -18,6 +18,7 @@
           "edit": {
             "type": "Select",
             "options": [
+              { "caption": "Scharf/Unscharf (schaltbar)", "value": "arm" },
               { "caption": "Alarm (Ja/Nein)", "value": "alarm" },
               { "caption": "Fenster/Tür (Auf/Zu)", "value": "window" },
               { "caption": "Zeitstempel", "value": "timestamp" },
@@ -30,7 +31,7 @@
     },
     {
       "type": "Label",
-      "caption": "Beliebige Variablen, z.B. die per 'HomeMatic Systemvariablen'-Instanz aus der CCU3 gespiegelten Alarm-Systemvariablen (Alarm intern/extern, Alarm Feuer/Wasser/Batterie, Fensteröffnungen, ...). 'Alarm' zeigt bei 'Ein' einen roten ALARM-Badge und löst den Alarm-Banner oben aus; 'Fenster/Tür' zeigt nur Auf/Zu ohne Alarm-Banner."
+      "caption": "Beliebige Variablen, z.B. die per 'HomeMatic Systemvariablen'-Instanz aus der CCU3 gespiegelten Alarm-Systemvariablen. 'Scharf/Unscharf' (für 'Alarm intern'/'Alarm extern') ist ein Schalter, der direkt auf die CCU3 zurückschreibt. 'Alarm' zeigt bei 'Ein' einen roten ALARM-Badge und löst den Alarm-Banner oben aus; 'Fenster/Tür' zeigt nur Auf/Zu ohne Alarm-Banner."
     },
     {
       "type": "SelectInstance",
