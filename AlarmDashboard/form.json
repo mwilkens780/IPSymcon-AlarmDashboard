@@ -19,6 +19,7 @@
             "type": "Select",
             "options": [
               { "caption": "Scharf/Unscharf (schaltbar)", "value": "arm" },
+              { "caption": "Sirene (schaltbar)", "value": "siren" },
               { "caption": "Alarm (Ja/Nein)", "value": "alarm" },
               { "caption": "Fenster/Tür (Auf/Zu)", "value": "window" },
               { "caption": "Zeitstempel", "value": "timestamp" },
@@ -31,7 +32,7 @@
     },
     {
       "type": "Label",
-      "caption": "Beliebige Variablen, z.B. die per 'HomeMatic Systemvariablen'-Instanz aus der CCU3 gespiegelten Alarm-Systemvariablen. 'Scharf/Unscharf' (für 'Alarm intern'/'Alarm extern') ist ein Schalter, der direkt auf die CCU3 zurückschreibt. 'Alarm' zeigt bei 'Ein' einen roten ALARM-Badge und löst den Alarm-Banner oben aus; 'Fenster/Tür' zeigt nur Auf/Zu ohne Alarm-Banner."
+      "caption": "Beliebige Variablen, z.B. die per 'HomeMatic Systemvariablen'-Instanz aus der CCU3 gespiegelten Alarm-Systemvariablen. 'Scharf/Unscharf' (für 'Alarm intern'/'Alarm extern') ist ein Schalter, der direkt auf die CCU3 zurückschreibt. 'Sirene' ist ein Schalter fuer z.B. ACOUSTIC_ALARM_ACTIVE/OPTICAL_ALARM_ACTIVE einer HomeMatic-Sirene (Ausschalten stoppt Ton/Blitz sofort). 'Alarm' zeigt bei 'Ein' einen roten ALARM-Badge und löst den Alarm-Banner oben aus; 'Fenster/Tür' zeigt nur Auf/Zu ohne Alarm-Banner."
     },
     {
       "type": "SelectInstance",

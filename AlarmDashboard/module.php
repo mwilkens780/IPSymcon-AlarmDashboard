@@ -85,15 +85,17 @@ class AlarmDashboard extends IPSModule
     }
 
     /**
-     * Scharf-/Unscharfschalten -- nur fuer Statuspunkte vom Typ "arm"
-     * (z.B. "Alarm intern"/"Alarm extern"). Schreibt direkt auf die
-     * konfigurierte, von der CCU3 gespiegelte Variable; die Rueckrichtung
-     * (IPS -> CCU3) ist vom Nutzer bestaetigt.
+     * Schaltbare Statuspunkte -- "arm" (Scharf/Unscharf, z.B. "Alarm intern"/
+     * "Alarm extern") und "siren" (z.B. ACOUSTIC_ALARM_ACTIVE/
+     * OPTICAL_ALARM_ACTIVE einer HomeMatic-Sirene -- Ausschalten stoppt Ton/
+     * Blitz sofort). Schreibt direkt auf die konfigurierte, von der CCU3
+     * gespiegelte Variable; die Rueckrichtung (IPS -> CCU3) ist fuer "arm"
+     * vom Nutzer bestaetigt und folgt fuer HomeMatic-Kanaele demselben Prinzip.
      */
     private function forwardStatusItemAction(int $index, bool $value): void
     {
         $rows = json_decode($this->ReadPropertyString('statusItems'), true) ?: [];
-        if (!isset($rows[$index]['variable']) || ($rows[$index]['type'] ?? '') !== 'arm') {
+        if (!isset($rows[$index]['variable']) || !in_array($rows[$index]['type'] ?? '', ['arm', 'siren'], true)) {
             return;
         }
         $varId = (int) $rows[$index]['variable'];
@@ -151,7 +153,7 @@ class AlarmDashboard extends IPSModule
                 'ident' => 'item_' . $i,
                 'name'  => $nameOverride ?? $this->deviceName($varId),
                 'type'  => $type,
-                'bool'  => in_array($type, ['alarm', 'window', 'arm'], true) ? (bool) $raw : null,
+                'bool'  => in_array($type, ['alarm', 'window', 'arm', 'siren'], true) ? (bool) $raw : null,
                 'raw'   => $raw,
             ];
         }
@@ -234,6 +236,7 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 .toggle input:checked ~ .toggle-track .toggle-thumb{transform:translateX(16px);background:#7ec8f0}
 .alarm-banner{background:#5a1010;border:1px solid #b03030;color:#ffb0a0;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;flex:none;animation:alarm-pulse 1.4s ease-in-out infinite}
 @keyframes alarm-pulse{0%,100%{opacity:1}50%{opacity:.7}}
+.siren-on{background:#5a1010;animation:alarm-pulse 1.4s ease-in-out infinite}
 .mini-btn{background:#1a2535;border:1px solid #2a3a50;color:#8aa8c8;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
 .battery-box table{width:100%;border-collapse:collapse;font-size:11px;color:#8aa8c8}
 .battery-box th,.battery-box td{text-align:left;padding:2px 4px}
@@ -256,7 +259,9 @@ var i18n = {
   offen: {$this->jsStr($this->Translate('Offen'))},
   geschlossen: {$this->jsStr($this->Translate('Geschlossen'))},
   scharf: {$this->jsStr($this->Translate('Scharf'))},
-  unscharf: {$this->jsStr($this->Translate('Unscharf'))}
+  unscharf: {$this->jsStr($this->Translate('Unscharf'))},
+  sirenOn: {$this->jsStr($this->Translate('Aktiv'))},
+  sirenOff: {$this->jsStr($this->Translate('Inaktiv'))}
 };
 
 function setText(id, text) {
@@ -287,6 +292,15 @@ function updateItem(item) {
     setText(item.ident + '_text', item.bool ? i18n.scharf : i18n.unscharf);
     var input = document.getElementById(item.ident + '_input');
     if (input) input.checked = !!item.bool;
+    return;
+  }
+  if (item.type === 'siren') {
+    var on = item.bool === true;
+    setText(item.ident + '_text', (on ? '🔊 ' : '🔇 ') + (on ? i18n.sirenOn : i18n.sirenOff));
+    var sirenInput = document.getElementById(item.ident + '_input');
+    if (sirenInput) sirenInput.checked = on;
+    var tile = document.getElementById(item.ident);
+    if (tile) tile.classList.toggle('siren-on', on);
     return;
   }
   if (item.type === 'alarm' || item.type === 'window') {
@@ -337,6 +351,21 @@ HTML;
   <span class='cur-label'>{$nameEsc}</span>
   <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
     <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$text}</span>
+    <label class="toggle"><input id='{$identEsc}_input' type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+  </div>
+</div>
+HTML;
+            case 'siren':
+                $on = $item['bool'] === true;
+                $checked = $on ? ' checked' : '';
+                $icon = $on ? '🔊' : '🔇';
+                $text = $on ? $this->Translate('Aktiv') : $this->Translate('Inaktiv');
+                $tileCls = $on ? 'cur-tile siren-on' : 'cur-tile';
+                return <<<HTML
+<div id='{$identEsc}' class='{$tileCls}'>
+  <span class='cur-label'>{$nameEsc}</span>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+    <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
     <label class="toggle"><input id='{$identEsc}_input' type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
   </div>
 </div>
