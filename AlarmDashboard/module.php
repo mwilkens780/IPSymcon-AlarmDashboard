@@ -183,27 +183,21 @@ class AlarmDashboard extends IPSModule
     {
         $d = $this->collectData();
 
-        $anyAlert = false;
         $alertNames = [];
         foreach ($d['items'] as $item) {
             if ($item['type'] === 'alarm' && $item['bool'] === true) {
-                $anyAlert = true;
                 $alertNames[] = $item['name'];
             }
         }
 
-        $alarmBanner = '';
-        if ($anyAlert) {
-            $namesEsc = htmlspecialchars(implode(', ', $alertNames), ENT_QUOTES);
-            $alarmBanner = '<div class="alarm-banner">🚨 ' . $this->Translate('ALARM') . ': ' . $namesEsc . '</div>';
-        }
+        $alarmBanner = $this->renderAlarmBanner($alertNames);
 
         $itemsHtml = '';
         foreach ($d['items'] as $item) {
             $itemsHtml .= $this->renderStatusItem($item);
         }
         $itemsBlock = $itemsHtml !== ''
-            ? '<div class="pv-block"><div class="pv-title">🛡️ ' . $this->Translate('Status') . '</div><div class="current-grid">' . $itemsHtml . '</div></div>'
+            ? '<div class="pv-block"><div class="pv-title">🛡️ ' . $this->Translate('Status') . '</div><div id="items-grid" class="current-grid">' . $itemsHtml . '</div></div>'
             : '';
 
         $batteryBlock = $this->renderBatteryPanel($d['battery']);
@@ -250,16 +244,64 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
   <span>🚨 {$this->Translate('Alarm')} <span id="updated" class="updated">{$this->Translate('Stand')} {$updatedEsc}</span></span>
 </div>
 
-{$alarmBanner}
+<div id="alarm-banner-wrap">{$alarmBanner}</div>
 {$itemsBlock}
 {$batteryBlock}
 
 <script>
 var state = {$initJson};
+var i18n = {
+  alarm: {$this->jsStr($this->Translate('ALARM'))},
+  ok: 'OK',
+  offen: {$this->jsStr($this->Translate('Offen'))},
+  geschlossen: {$this->jsStr($this->Translate('Geschlossen'))},
+  scharf: {$this->jsStr($this->Translate('Scharf'))},
+  unscharf: {$this->jsStr($this->Translate('Unscharf'))}
+};
 
 function setText(id, text) {
   var el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+function escapeHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function updateBanner(items) {
+  var names = [];
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].type === 'alarm' && items[i].bool === true) names.push(items[i].name);
+  }
+  var wrap = document.getElementById('alarm-banner-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = names.length > 0
+    ? '<div class="alarm-banner">🚨 ' + i18n.alarm + ': ' + escapeHtml(names.join(', ')) + '</div>'
+    : '';
+}
+
+function updateItem(item) {
+  if (item.type === 'arm') {
+    setText(item.ident + '_text', item.bool ? i18n.scharf : i18n.unscharf);
+    var input = document.getElementById(item.ident + '_input');
+    if (input) input.checked = !!item.bool;
+    return;
+  }
+  if (item.type === 'alarm' || item.type === 'window') {
+    var badge = document.getElementById(item.ident + '_badge');
+    if (!badge) return;
+    var on = item.bool === true;
+    badge.className = 'badge ' + (on ? 'badge-warn' : 'badge-off');
+    if (item.type === 'alarm') {
+      badge.textContent = on ? i18n.alarm : i18n.ok;
+    } else {
+      badge.textContent = on ? i18n.offen : i18n.geschlossen;
+    }
+    return;
+  }
+  // timestamp/text: reines Anzeigefeld, unveraendert seit Erstrender ok
 }
 
 window.handleMessage = function(raw) {
@@ -268,9 +310,10 @@ window.handleMessage = function(raw) {
   var val = msg.value;
   state = val;
   setText('updated', val.updated);
-  // Volle Neu-Darstellung (Alarm-Banner, Statuspunkte, Batterie) erfolgt
-  // beim naechsten Kachel-Reload -- bewusst kein Live-Patch dieser Felder,
-  // gleiches Prinzip wie bei Sensoren/Rauchmeldern im Room Dashboard.
+  updateBanner(val.items);
+  for (var i = 0; i < val.items.length; i++) {
+    updateItem(val.items[i]);
+  }
 };
 </script>
 </body>
@@ -282,17 +325,19 @@ HTML;
     {
         $nameEsc = htmlspecialchars($item['name'], ENT_QUOTES);
 
+        $identEsc = htmlspecialchars($item['ident'], ENT_QUOTES);
+
         switch ($item['type']) {
             case 'arm':
                 $on = $item['bool'] === true;
                 $checked = $on ? ' checked' : '';
                 $text = $on ? $this->Translate('Scharf') : $this->Translate('Unscharf');
                 return <<<HTML
-<div class='cur-tile'>
+<div id='{$identEsc}' class='cur-tile'>
   <span class='cur-label'>{$nameEsc}</span>
   <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-    <span class='cur-value' style="font-size:12px">{$text}</span>
-    <label class="toggle"><input type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+    <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$text}</span>
+    <label class="toggle"><input id='{$identEsc}_input' type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
   </div>
 </div>
 HTML;
@@ -300,12 +345,12 @@ HTML;
                 $on = $item['bool'] === true;
                 $cls = $on ? 'badge-warn' : 'badge-off';
                 $text = $on ? $this->Translate('ALARM') : 'OK';
-                return $this->renderBadgeTile($nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
+                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
             case 'window':
                 $on = $item['bool'] === true;
                 $cls = $on ? 'badge-warn' : 'badge-off';
                 $text = $on ? $this->Translate('Offen') : $this->Translate('Geschlossen');
-                return $this->renderBadgeTile($nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
+                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
             case 'timestamp':
                 $ts = (int) $item['raw'];
                 $text = $ts > 0 ? date('d.m.Y H:i', $ts) : '–';
@@ -316,9 +361,24 @@ HTML;
         }
     }
 
-    private function renderBadgeTile(string $nameEsc, string $badgeClass, string $textEsc): string
+    private function renderBadgeTile(string $identEsc, string $nameEsc, string $badgeClass, string $textEsc): string
     {
-        return "<div class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span class='badge {$badgeClass}' style='align-self:flex-start'>{$textEsc}</span></div>";
+        return "<div id='{$identEsc}' class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span id='{$identEsc}_badge' class='badge {$badgeClass}' style='align-self:flex-start'>{$textEsc}</span></div>";
+    }
+
+    private function renderAlarmBanner(array $alertNames): string
+    {
+        if (count($alertNames) === 0) {
+            return '';
+        }
+        $namesEsc = htmlspecialchars(implode(', ', $alertNames), ENT_QUOTES);
+        return '<div class="alarm-banner">🚨 ' . $this->Translate('ALARM') . ': ' . $namesEsc . '</div>';
+    }
+
+    /** Encodes a translated string for safe embedding as a JS literal. */
+    private function jsStr(string $s): string
+    {
+        return json_encode($s, JSON_UNESCAPED_UNICODE);
     }
 
     private function renderValueTile(string $nameEsc, string $valueEsc): string
