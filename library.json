@@ -2,9 +2,9 @@
     "id": "{91CED6BA-A7CB-42B2-BB40-4D6E2F929329}",
     "author": "Martin Wilkens",
     "name": "Alarm Dashboard",
-    "description": "Dashboard fuer die Hausalarmanlage: liest die von der HomeMatic CCU3 (per 'HomeMatic Systemvariablen'-Instanz) gespiegelten Alarm-Systemvariablen als frei konfigurierbare Statuspunkte (Scharf/Unscharf-Schalter, Sirene-Schalter, Alarm/Fenster/Zeitstempel/Text) plus einen Batterie-Sammelstatus. Die Alarmlogik selbst bleibt bewusst allein auf der CCU3, kein paralleles IPS-Alarmsystem.",
-    "version": "2.3",
-    "build": 5,
-    "date": 1788296278,
+    "description": "Dashboard fuer die Hausalarmanlage: liest die von der HomeMatic CCU3 (per 'HomeMatic Systemvariablen'-Instanz) gespiegelten Alarm-Systemvariablen als frei konfigurierbare Statuspunkte (Scharf/Unscharf-Schalter, Alarm/Fenster/Zeitstempel/Text), einen Batterie-Sammelstatus (ProfileMonitor) sowie optional eine Sirene (HomeMatic-Instanz, Kanaele automatisch erkannt). Die Alarmlogik selbst bleibt bewusst allein auf der CCU3, kein paralleles IPS-Alarmsystem.",
+    "version": "2.4",
+    "build": 6,
+    "date": 1788350948,
     "url": "https://github.com/mwilkens780/IPSymcon-AlarmDashboard"
 }

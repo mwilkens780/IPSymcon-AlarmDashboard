@@ -19,7 +19,6 @@
             "type": "Select",
             "options": [
               { "caption": "Scharf/Unscharf (schaltbar)", "value": "arm" },
-              { "caption": "Sirene (schaltbar)", "value": "siren" },
               { "caption": "Alarm (Ja/Nein)", "value": "alarm" },
               { "caption": "Fenster/Tür (Auf/Zu)", "value": "window" },
               { "caption": "Zeitstempel", "value": "timestamp" },
@@ -32,7 +31,7 @@
     },
     {
       "type": "Label",
-      "caption": "Beliebige Variablen, z.B. die per 'HomeMatic Systemvariablen'-Instanz aus der CCU3 gespiegelten Alarm-Systemvariablen. 'Scharf/Unscharf' (für 'Alarm intern'/'Alarm extern') ist ein Schalter, der direkt auf die CCU3 zurückschreibt. 'Sirene' ist ein Schalter fuer z.B. ACOUSTIC_ALARM_ACTIVE/OPTICAL_ALARM_ACTIVE einer HomeMatic-Sirene (Ausschalten stoppt Ton/Blitz sofort). 'Alarm' zeigt bei 'Ein' einen roten ALARM-Badge und löst den Alarm-Banner oben aus; 'Fenster/Tür' zeigt nur Auf/Zu ohne Alarm-Banner."
+      "caption": "Beliebige Variablen, z.B. die per 'HomeMatic Systemvariablen'-Instanz aus der CCU3 gespiegelten Alarm-Systemvariablen. 'Scharf/Unscharf' (für 'Alarm intern'/'Alarm extern') ist ein Schalter, der direkt auf die CCU3 zurückschreibt. 'Alarm' zeigt bei 'Ein' einen roten ALARM-Badge und löst den Alarm-Banner oben aus; 'Fenster/Tür' zeigt nur Auf/Zu ohne Alarm-Banner."
     },
     {
       "type": "SelectInstance",
@@ -42,6 +41,15 @@
     {
       "type": "Label",
       "caption": "Eine ProfileMonitor-Instanz mit den Datenpunkten 'Warning' und 'Devices_With_Empty_Battery'."
+    },
+    {
+      "type": "SelectInstance",
+      "name": "siren_instance",
+      "caption": "Sirene (optional)"
+    },
+    {
+      "type": "Label",
+      "caption": "Die HomeMatic-Geräteinstanz der Sirene (z.B. der Kanal mit ACOUSTIC_ALARM_ACTIVE/OPTICAL_ALARM_ACTIVE, bei HM-Sec-SFA-SM meist Kanal 3). Beide Kanäle werden automatisch erkannt; Ausschalten stoppt Ton/Blitz sofort."
     },
     {
       "type": "NumberSpinner",
@@ -61,6 +69,6 @@
   "status": [
     { "code": 102, "icon": "active",   "caption": "Aktiv" },
     { "code": 200, "icon": "error",    "caption": "Fehler – Details im IPS-Log" },
-    { "code": 201, "icon": "inactive", "caption": "Nicht konfiguriert – mindestens einen Statuspunkt oder den Batterie-Monitor hinzufügen" }
+    { "code": 201, "icon": "inactive", "caption": "Nicht konfiguriert – mindestens einen Statuspunkt, den Batterie-Monitor oder die Sirene hinzufügen" }
   ]
 }

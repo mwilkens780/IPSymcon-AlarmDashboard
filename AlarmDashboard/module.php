@@ -5,8 +5,11 @@ declare(strict_types=1);
 /**
  * Zeigt die Hausalarm-Komponenten in einer Kachel: beliebig viele
  * Statuspunkte (freie Liste, z.B. die per "HomeMatic Systemvariablen"-
- * Instanz aus der CCU3 gespiegelten Alarm-/Fenster-/Wasseralarm-Variablen)
- * sowie der Batterie-Sammelstatus (ProfileMonitor).
+ * Instanz aus der CCU3 gespiegelten Alarm-/Fenster-/Wasseralarm-Variablen),
+ * der Batterie-Sammelstatus (ProfileMonitor) sowie optional eine Sirene
+ * (HomeMatic-Geraeteinstanz, ACOUSTIC_ALARM_ACTIVE/OPTICAL_ALARM_ACTIVE
+ * werden automatisch anhand ihres Idents gefunden, kein manuelles
+ * Verdrahten einzelner Variablen noetig).
  *
  * Bewusst NICHT eingebaut: eine eigene, parallele Alarmlogik (wie das
  * IPS-Kernmodul "Alerting"). Die Alarmlogik lebt vollstaendig in den
@@ -24,6 +27,7 @@ class AlarmDashboard extends IPSModule
 
         $this->RegisterPropertyString('statusItems', '[]');
         $this->RegisterPropertyInteger('battery_monitor', 0);
+        $this->RegisterPropertyInteger('siren_instance', 0);
         $this->RegisterPropertyInteger('update_interval', 30);
 
         $this->RegisterTimer('UpdateTimer', 0, 'ALD_Refresh($_IPS[\'TARGET\']);');
@@ -35,7 +39,9 @@ class AlarmDashboard extends IPSModule
         parent::ApplyChanges();
 
         $items = json_decode($this->ReadPropertyString('statusItems'), true) ?: [];
-        $hasAnything = count($items) > 0 || $this->ReadPropertyInteger('battery_monitor') > 0;
+        $hasAnything = count($items) > 0
+            || $this->ReadPropertyInteger('battery_monitor') > 0
+            || $this->ReadPropertyInteger('siren_instance') > 0;
 
         if (!$hasAnything) {
             $this->SetStatus(201);
@@ -78,6 +84,10 @@ class AlarmDashboard extends IPSModule
                 $this->forwardBatteryRescan();
                 return;
             }
+            if ($Ident === 'siren_acoustic' || $Ident === 'siren_optical') {
+                $this->forwardSirenAction($Ident === 'siren_acoustic' ? 'ACOUSTIC_ALARM_ACTIVE' : 'OPTICAL_ALARM_ACTIVE', (bool) $Value);
+                return;
+            }
             $this->LogMessage("AlarmDashboard RequestAction: unknown ident {$Ident}", KL_WARNING);
         } catch (\Throwable $e) {
             $this->LogMessage('AlarmDashboard RequestAction ' . $Ident . ': ' . $e->getMessage(), KL_ERROR);
@@ -85,17 +95,15 @@ class AlarmDashboard extends IPSModule
     }
 
     /**
-     * Schaltbare Statuspunkte -- "arm" (Scharf/Unscharf, z.B. "Alarm intern"/
-     * "Alarm extern") und "siren" (z.B. ACOUSTIC_ALARM_ACTIVE/
-     * OPTICAL_ALARM_ACTIVE einer HomeMatic-Sirene -- Ausschalten stoppt Ton/
-     * Blitz sofort). Schreibt direkt auf die konfigurierte, von der CCU3
-     * gespiegelte Variable; die Rueckrichtung (IPS -> CCU3) ist fuer "arm"
-     * vom Nutzer bestaetigt und folgt fuer HomeMatic-Kanaele demselben Prinzip.
+     * Scharf-/Unscharfschalten -- nur fuer Statuspunkte vom Typ "arm"
+     * (z.B. "Alarm intern"/"Alarm extern"). Schreibt direkt auf die
+     * konfigurierte, von der CCU3 gespiegelte Variable; die Rueckrichtung
+     * (IPS -> CCU3) ist vom Nutzer bestaetigt.
      */
     private function forwardStatusItemAction(int $index, bool $value): void
     {
         $rows = json_decode($this->ReadPropertyString('statusItems'), true) ?: [];
-        if (!isset($rows[$index]['variable']) || !in_array($rows[$index]['type'] ?? '', ['arm', 'siren'], true)) {
+        if (!isset($rows[$index]['variable']) || ($rows[$index]['type'] ?? '') !== 'arm') {
             return;
         }
         $varId = (int) $rows[$index]['variable'];
@@ -118,6 +126,22 @@ class AlarmDashboard extends IPSModule
         }
     }
 
+    /**
+     * Schaltet die Sirene aus/ein -- schreibt direkt auf den
+     * ACOUSTIC_ALARM_ACTIVE/OPTICAL_ALARM_ACTIVE-Kanal der konfigurierten
+     * HomeMatic-Sirenen-Instanz (Standardverhalten von HM-Sec-SFA-SM:
+     * "false" schreiben stoppt Ton/Blitz sofort).
+     */
+    private function forwardSirenAction(string $ident, bool $value): void
+    {
+        $nodeId = $this->ReadPropertyInteger('siren_instance');
+        $varId  = $this->varIdByIdent($nodeId, $ident);
+        if ($varId <= 0) {
+            return;
+        }
+        RequestAction($varId, $value);
+    }
+
     // ─── Data collection ──────────────────────────────────────────────────────
 
     private function collectData(): array
@@ -125,6 +149,7 @@ class AlarmDashboard extends IPSModule
         return [
             'items'   => $this->collectStatusItems(),
             'battery' => $this->collectBattery(),
+            'siren'   => $this->collectSiren(),
             'updated' => date('d.m. H:i'),
         ];
     }
@@ -153,7 +178,7 @@ class AlarmDashboard extends IPSModule
                 'ident' => 'item_' . $i,
                 'name'  => $nameOverride ?? $this->deviceName($varId),
                 'type'  => $type,
-                'bool'  => in_array($type, ['alarm', 'window', 'arm', 'siren'], true) ? (bool) $raw : null,
+                'bool'  => in_array($type, ['alarm', 'window', 'arm'], true) ? (bool) $raw : null,
                 'raw'   => $raw,
             ];
         }
@@ -176,6 +201,30 @@ class AlarmDashboard extends IPSModule
             'warning' => (bool) $this->readVarById($warningId),
             'count'   => $countId > 0 ? (int) $this->readVarById($countId) : 0,
             'box'     => $boxId > 0 ? (string) $this->readVarById($boxId) : '',
+        ];
+    }
+
+    /**
+     * Liest Sirenen-Status von der konfigurierten HomeMatic-Geraeteinstanz --
+     * kein manuelles Verdrahten einzelner Variablen noetig, die bekannten
+     * Kanal-Idents (ACOUSTIC_ALARM_ACTIVE/OPTICAL_ALARM_ACTIVE, Standard bei
+     * HomeMatic-Sirenen wie HM-Sec-SFA-SM) werden automatisch gefunden --
+     * gleiches Prinzip wie collectBattery() beim ProfileMonitor.
+     */
+    private function collectSiren(): ?array
+    {
+        $nodeId = $this->ReadPropertyInteger('siren_instance');
+        if ($nodeId <= 0 || !@IPS_InstanceExists($nodeId)) {
+            return null;
+        }
+        $acousticId = $this->varIdByIdent($nodeId, 'ACOUSTIC_ALARM_ACTIVE');
+        $opticalId  = $this->varIdByIdent($nodeId, 'OPTICAL_ALARM_ACTIVE');
+        if ($acousticId <= 0 && $opticalId <= 0) {
+            return null;
+        }
+        return [
+            'acoustic' => $acousticId > 0 ? (bool) $this->readVarById($acousticId) : null,
+            'optical'  => $opticalId > 0 ? (bool) $this->readVarById($opticalId) : null,
         ];
     }
 
@@ -203,6 +252,7 @@ class AlarmDashboard extends IPSModule
             : '';
 
         $batteryBlock = $this->renderBatteryPanel($d['battery']);
+        $sirenBlock   = $this->renderSirenPanel($d['siren']);
 
         $updatedEsc = htmlspecialchars($d['updated'], ENT_QUOTES);
         $initJson = json_encode($d);
@@ -249,6 +299,7 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 
 <div id="alarm-banner-wrap">{$alarmBanner}</div>
 {$itemsBlock}
+{$sirenBlock}
 {$batteryBlock}
 
 <script>
@@ -294,15 +345,6 @@ function updateItem(item) {
     if (input) input.checked = !!item.bool;
     return;
   }
-  if (item.type === 'siren') {
-    var on = item.bool === true;
-    setText(item.ident + '_text', (on ? '🔊 ' : '🔇 ') + (on ? i18n.sirenOn : i18n.sirenOff));
-    var sirenInput = document.getElementById(item.ident + '_input');
-    if (sirenInput) sirenInput.checked = on;
-    var tile = document.getElementById(item.ident);
-    if (tile) tile.classList.toggle('siren-on', on);
-    return;
-  }
   if (item.type === 'alarm' || item.type === 'window') {
     var badge = document.getElementById(item.ident + '_badge');
     if (!badge) return;
@@ -318,6 +360,21 @@ function updateItem(item) {
   // timestamp/text: reines Anzeigefeld, unveraendert seit Erstrender ok
 }
 
+function setSirenChannel(ident, on) {
+  var tile = document.getElementById(ident);
+  if (!tile) return;
+  tile.classList.toggle('siren-on', on === true);
+  setText(ident + '_text', (on ? '🔊 ' : '🔇 ') + (on ? i18n.sirenOn : i18n.sirenOff));
+  var input = document.getElementById(ident + '_input');
+  if (input) input.checked = on === true;
+}
+
+function updateSiren(siren) {
+  if (!siren) return;
+  if (siren.acoustic !== null) setSirenChannel('siren_acoustic', siren.acoustic);
+  if (siren.optical !== null) setSirenChannel('siren_optical', siren.optical);
+}
+
 window.handleMessage = function(raw) {
   var msg = JSON.parse(raw);
   if (msg.key !== '__all__') return;
@@ -328,6 +385,7 @@ window.handleMessage = function(raw) {
   for (var i = 0; i < val.items.length; i++) {
     updateItem(val.items[i]);
   }
+  updateSiren(val.siren);
 };
 </script>
 </body>
@@ -351,21 +409,6 @@ HTML;
   <span class='cur-label'>{$nameEsc}</span>
   <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
     <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$text}</span>
-    <label class="toggle"><input id='{$identEsc}_input' type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
-  </div>
-</div>
-HTML;
-            case 'siren':
-                $on = $item['bool'] === true;
-                $checked = $on ? ' checked' : '';
-                $icon = $on ? '🔊' : '🔇';
-                $text = $on ? $this->Translate('Aktiv') : $this->Translate('Inaktiv');
-                $tileCls = $on ? 'cur-tile siren-on' : 'cur-tile';
-                return <<<HTML
-<div id='{$identEsc}' class='{$tileCls}'>
-  <span class='cur-label'>{$nameEsc}</span>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-    <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
     <label class="toggle"><input id='{$identEsc}_input' type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
   </div>
 </div>
@@ -438,6 +481,48 @@ HTML;
   </div>
   {$boxHtml}
   <button type="button" class="mini-btn" onclick="requestAction('battery_rescan', 1)">{$this->Translate('Jetzt prüfen')}</button>
+</div>
+HTML;
+    }
+
+    private function renderSirenPanel(?array $siren): string
+    {
+        if ($siren === null) {
+            return '';
+        }
+
+        $rows = '';
+        if ($siren['acoustic'] !== null) {
+            $rows .= $this->renderSirenChannel('siren_acoustic', $this->Translate('Akustisch'), $siren['acoustic']);
+        }
+        if ($siren['optical'] !== null) {
+            $rows .= $this->renderSirenChannel('siren_optical', $this->Translate('Optisch'), $siren['optical']);
+        }
+        if ($rows === '') {
+            return '';
+        }
+
+        return <<<HTML
+<div class="pv-block">
+  <div class="pv-title">🔊 {$this->Translate('Sirene')}</div>
+  <div class="current-grid">{$rows}</div>
+</div>
+HTML;
+    }
+
+    private function renderSirenChannel(string $ident, string $nameEsc, bool $on): string
+    {
+        $checked = $on ? ' checked' : '';
+        $icon    = $on ? '🔊' : '🔇';
+        $text    = $on ? $this->Translate('Aktiv') : $this->Translate('Inaktiv');
+        $tileCls = $on ? 'cur-tile siren-on' : 'cur-tile';
+        return <<<HTML
+<div id='{$ident}' class='{$tileCls}'>
+  <span class='cur-label'>{$nameEsc}</span>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+    <span id='{$ident}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
+    <label class="toggle"><input id='{$ident}_input' type="checkbox"{$checked} onchange="requestAction('{$ident}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+  </div>
 </div>
 HTML;
     }
