@@ -278,12 +278,10 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 .cur-value{font-size:15px;font-weight:700;color:#d0e8ff}
 .pv-block{display:flex;flex-direction:column;gap:8px;flex:none;background:#0f1c30;border-radius:10px;padding:8px}
 .pv-title{font-size:12px;font-weight:700;color:#d0e8ff}
-.toggle{position:relative;width:38px;height:22px;flex:none;display:inline-block}
-.toggle input{opacity:0;position:absolute;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}
-.toggle-track{position:absolute;inset:0;background:#1a2535;border:1px solid #2a3a50;border-radius:11px;transition:.15s}
-.toggle-thumb{position:absolute;top:1px;left:1px;width:16px;height:16px;background:#8aa8c8;border-radius:50%;transition:.15s}
-.toggle input:checked ~ .toggle-track{background:#12405a;border-color:#2a7aa0}
-.toggle input:checked ~ .toggle-track .toggle-thumb{transform:translateX(16px);background:#7ec8f0}
+/* Klickbare Statuspunkte (Scharf/Unscharf, Sirenenkanaele): die ganze Kachel ist der Button, kein eingebetteter Zweit-Schalter. */
+.cur-tile.clickable{cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;transition:background-color .15s,transform .08s;border:1px solid #1e3a5f}
+.cur-tile.clickable:active{transform:scale(.97)}
+.cur-tile.on{background:#1a3448;border-color:#2a7aa0}
 .alarm-banner{background:#5a1010;border:1px solid #b03030;color:#ffb0a0;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;flex:none;animation:alarm-pulse 1.4s ease-in-out infinite}
 @keyframes alarm-pulse{0%,100%{opacity:1}50%{opacity:.7}}
 .siren-on{background:#5a1010;animation:alarm-pulse 1.4s ease-in-out infinite}
@@ -338,11 +336,23 @@ function updateBanner(items) {
     : '';
 }
 
+function toggleCurTile(ident) {
+  var input = document.getElementById(ident + '_input');
+  var card = document.getElementById(ident);
+  var next = input ? !input.checked : true;
+  if (input) input.checked = next;
+  if (card) card.classList.toggle('on', next);
+  requestAction(ident, next);
+}
+
 function updateItem(item) {
   if (item.type === 'arm') {
-    setText(item.ident + '_text', item.bool ? i18n.scharf : i18n.unscharf);
+    var icon = item.bool ? '🔒' : '🔓';
+    setText(item.ident + '_text', icon + ' ' + (item.bool ? i18n.scharf : i18n.unscharf));
     var input = document.getElementById(item.ident + '_input');
     if (input) input.checked = !!item.bool;
+    var card = document.getElementById(item.ident);
+    if (card) card.classList.toggle('on', !!item.bool);
     return;
   }
   if (item.type === 'alarm' || item.type === 'window') {
@@ -351,9 +361,9 @@ function updateItem(item) {
     var on = item.bool === true;
     badge.className = 'badge ' + (on ? 'badge-warn' : 'badge-off');
     if (item.type === 'alarm') {
-      badge.textContent = on ? i18n.alarm : i18n.ok;
+      badge.textContent = (on ? '🚨 ' : '🔕 ') + (on ? i18n.alarm : i18n.ok);
     } else {
-      badge.textContent = on ? i18n.offen : i18n.geschlossen;
+      badge.textContent = (on ? '🔓 ' : '🔒 ') + (on ? i18n.offen : i18n.geschlossen);
     }
     return;
   }
@@ -364,6 +374,7 @@ function setSirenChannel(ident, on) {
   var tile = document.getElementById(ident);
   if (!tile) return;
   tile.classList.toggle('siren-on', on === true);
+  tile.classList.toggle('on', on === true);
   setText(ident + '_text', (on ? '🔊 ' : '🔇 ') + (on ? i18n.sirenOn : i18n.sirenOff));
   var input = document.getElementById(ident + '_input');
   if (input) input.checked = on === true;
@@ -403,26 +414,28 @@ HTML;
             case 'arm':
                 $on = $item['bool'] === true;
                 $checked = $on ? ' checked' : '';
+                $onClass = $on ? ' on' : '';
+                $icon = $on ? '🔒' : '🔓';
                 $text = $on ? $this->Translate('Scharf') : $this->Translate('Unscharf');
                 return <<<HTML
-<div id='{$identEsc}' class='cur-tile'>
+<div id='{$identEsc}' class='cur-tile clickable{$onClass}' onclick="toggleCurTile('{$item['ident']}')">
   <span class='cur-label'>{$nameEsc}</span>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-    <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$text}</span>
-    <label class="toggle"><input id='{$identEsc}_input' type="checkbox"{$checked} onchange="requestAction('{$item['ident']}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
-  </div>
+  <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
+  <input id='{$identEsc}_input' type="checkbox"{$checked} style="display:none">
 </div>
 HTML;
             case 'alarm':
                 $on = $item['bool'] === true;
                 $cls = $on ? 'badge-warn' : 'badge-off';
+                $icon = $on ? '🚨' : '🔕';
                 $text = $on ? $this->Translate('ALARM') : 'OK';
-                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
+                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
             case 'window':
                 $on = $item['bool'] === true;
                 $cls = $on ? 'badge-warn' : 'badge-off';
+                $icon = $on ? '🔓' : '🔒';
                 $text = $on ? $this->Translate('Offen') : $this->Translate('Geschlossen');
-                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, htmlspecialchars($text, ENT_QUOTES));
+                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
             case 'timestamp':
                 $ts = (int) $item['raw'];
                 $text = $ts > 0 ? date('d.m.Y H:i', $ts) : '–';
@@ -515,14 +528,12 @@ HTML;
         $checked = $on ? ' checked' : '';
         $icon    = $on ? '🔊' : '🔇';
         $text    = $on ? $this->Translate('Aktiv') : $this->Translate('Inaktiv');
-        $tileCls = $on ? 'cur-tile siren-on' : 'cur-tile';
+        $tileCls = $on ? 'cur-tile clickable siren-on on' : 'cur-tile clickable';
         return <<<HTML
-<div id='{$ident}' class='{$tileCls}'>
+<div id='{$ident}' class='{$tileCls}' onclick="toggleCurTile('{$ident}')">
   <span class='cur-label'>{$nameEsc}</span>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-    <span id='{$ident}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
-    <label class="toggle"><input id='{$ident}_input' type="checkbox"{$checked} onchange="requestAction('{$ident}', this.checked)"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
-  </div>
+  <span id='{$ident}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
+  <input id='{$ident}_input' type="checkbox"{$checked} style="display:none">
 </div>
 HTML;
     }
