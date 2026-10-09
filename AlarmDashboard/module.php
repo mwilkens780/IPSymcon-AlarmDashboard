@@ -285,7 +285,6 @@ body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemF
 .alarm-banner{background:#5a1010;border:1px solid #b03030;color:#ffb0a0;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;flex:none;animation:alarm-pulse 1.4s ease-in-out infinite}
 @keyframes alarm-pulse{0%,100%{opacity:1}50%{opacity:.7}}
 .siren-on{background:#5a1010;animation:alarm-pulse 1.4s ease-in-out infinite}
-.mini-btn{background:#1a2535;border:1px solid #2a3a50;color:#8aa8c8;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}
 .battery-box table{width:100%;border-collapse:collapse;font-size:11px;color:#8aa8c8}
 .battery-box th,.battery-box td{text-align:left;padding:2px 4px}
 </style>
@@ -359,7 +358,7 @@ function updateItem(item) {
     var badge = document.getElementById(item.ident + '_badge');
     if (!badge) return;
     var on = item.bool === true;
-    badge.className = 'badge ' + (on ? 'badge-warn' : 'badge-off');
+    badge.style.color = on ? '#f08060' : '#4a6a8a';
     if (item.type === 'alarm') {
       badge.textContent = (on ? '🚨 ' : '🔕 ') + (on ? i18n.alarm : i18n.ok);
     } else {
@@ -426,16 +425,16 @@ HTML;
 HTML;
             case 'alarm':
                 $on = $item['bool'] === true;
-                $cls = $on ? 'badge-warn' : 'badge-off';
+                $color = $on ? '#f08060' : '#4a6a8a';
                 $icon = $on ? '🚨' : '🔕';
                 $text = $on ? $this->Translate('ALARM') : 'OK';
-                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
+                return $this->renderBadgeTile($identEsc, $nameEsc, $color, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
             case 'window':
                 $on = $item['bool'] === true;
-                $cls = $on ? 'badge-warn' : 'badge-off';
+                $color = $on ? '#f08060' : '#4a6a8a';
                 $icon = $on ? '🔓' : '🔒';
                 $text = $on ? $this->Translate('Offen') : $this->Translate('Geschlossen');
-                return $this->renderBadgeTile($identEsc, $nameEsc, $cls, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
+                return $this->renderBadgeTile($identEsc, $nameEsc, $color, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
             case 'timestamp':
                 $ts = (int) $item['raw'];
                 $text = $ts > 0 ? date('d.m.Y H:i', $ts) : '–';
@@ -446,9 +445,9 @@ HTML;
         }
     }
 
-    private function renderBadgeTile(string $identEsc, string $nameEsc, string $badgeClass, string $textEsc): string
+    private function renderBadgeTile(string $identEsc, string $nameEsc, string $color, string $textEsc): string
     {
-        return "<div id='{$identEsc}' class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span id='{$identEsc}_badge' class='badge {$badgeClass}' style='align-self:flex-start'>{$textEsc}</span></div>";
+        return "<div id='{$identEsc}' class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span id='{$identEsc}_badge' class='cur-value' style='color:{$color}'>{$textEsc}</span></div>";
     }
 
     private function renderAlarmBanner(array $alertNames): string
@@ -477,23 +476,27 @@ HTML;
             return '';
         }
 
-        $badge = $battery['warning']
-            ? '<span class="badge badge-warn">' . $battery['count'] . ' ' . $this->Translate('schwach') . '</span>'
-            : '<span class="badge badge-off">OK</span>';
+        $statusColor = $battery['warning'] ? '#f08060' : '#4a6a8a';
+        $statusIcon  = $battery['warning'] ? '🪫' : '🔋';
+        $statusText  = $battery['warning']
+            ? htmlspecialchars($battery['count'] . ' ' . $this->Translate('schwach'), ENT_QUOTES)
+            : 'OK';
 
         $boxHtml = '';
         if ($battery['warning'] && strpos($battery['box'], 'Keine Komponenten') === false) {
             $boxHtml = '<div class="battery-box">' . $battery['box'] . '</div>';
         }
 
+        $rescanLabel = $this->Translate('Jetzt prüfen');
+
         return <<<HTML
 <div class="pv-block">
-  <div class="pv-title" style="display:flex;justify-content:space-between;align-items:center">
-    <span>🔋 {$this->Translate('Batterien')}</span>
-    {$badge}
+  <div class="pv-title">🔋 {$this->Translate('Batterien')}</div>
+  <div class="current-grid">
+    <div id="battery_status" class="cur-tile"><span class="cur-label">{$this->Translate('Status')}</span><span id="battery_status_val" class="cur-value" style="color:{$statusColor}">{$statusIcon} {$statusText}</span></div>
+    <div class="cur-tile clickable" onclick="requestAction('battery_rescan', 1)"><span class="cur-label">{$this->Translate('Aktion')}</span><span class="cur-value">🔄 {$rescanLabel}</span></div>
   </div>
   {$boxHtml}
-  <button type="button" class="mini-btn" onclick="requestAction('battery_rescan', 1)">{$this->Translate('Jetzt prüfen')}</button>
 </div>
 HTML;
     }
