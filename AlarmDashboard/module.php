@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../libs/TileKit.php';
+
 /**
  * Zeigt die Hausalarm-Komponenten in einer Kachel: beliebig viele
  * Statuspunkte (freie Liste, z.B. die per "HomeMatic Systemvariablen"-
@@ -21,6 +23,8 @@ declare(strict_types=1);
  */
 class AlarmDashboard extends IPSModule
 {
+    use \Fuchsbau\TileKit\AlarmDashboard\TileKit;
+
     public function Create(): void
     {
         parent::Create();
@@ -63,7 +67,7 @@ class AlarmDashboard extends IPSModule
     public function Refresh(): void
     {
         try {
-            $this->pushValue('__all__', $this->collectData());
+            $this->tkPush('__all__', $this->decorate($this->collectData()));
             $this->SetStatus(102);
         } catch (\Throwable $e) {
             $this->LogMessage('AlarmDashboard Refresh: ' . $e->getMessage(), KL_ERROR);
@@ -76,6 +80,8 @@ class AlarmDashboard extends IPSModule
     public function RequestAction($Ident, $Value): void
     {
         try {
+            // TileKit-Schalter senden '<ident>_toggle'
+            $Ident = (string) preg_replace('/_toggle$/', '', (string) $Ident);
             if (strpos($Ident, 'item_') === 0) {
                 $this->forwardStatusItemAction((int) substr($Ident, strlen('item_')), (bool) $Value);
                 return;
@@ -228,325 +234,143 @@ class AlarmDashboard extends IPSModule
         ];
     }
 
-    // ─── Rendering ──────────────────────────────────────────────────────────────
+    // ─── Rendering (TileKit, siehe docs/ui-kachel.md im Workspace) ─────────────
+
+    /**
+     * Ergaenzt die Rohdaten um die Anzeige (Text, Icon, Zustand), damit
+     * Erstrender und Live-Push dieselbe Logik nutzen und das JS nur noch
+     * Texte/Klassen setzt.
+     */
+    private function decorate(array $d): array
+    {
+        $alerts = [];
+        foreach ($d['items'] as &$item) {
+            $on = $item['bool'] === true;
+            switch ($item['type']) {
+                case 'arm':
+                    $item['view'] = ['text' => $this->Translate($on ? 'Scharf' : 'Unscharf'), 'icon' => $on ? '🔒' : '🔓', 'on' => $on];
+                    break;
+                case 'alarm':
+                    $icon = self::tkTopicIcon($item['name'], $on) ?: ($on ? '🚨' : '🔕');
+                    $item['view'] = ['text' => $on ? $this->Translate('ALARM') : 'OK', 'icon' => $icon, 'state' => $on ? 'alarm' : 'ok'];
+                    if ($on) {
+                        $alerts[] = $item['name'];
+                    }
+                    break;
+                case 'window':
+                    $item['view'] = ['text' => $this->Translate($on ? 'Offen' : 'Geschlossen'), 'icon' => $on ? '🔓' : '🔒', 'state' => $on ? 'warn' : ''];
+                    break;
+                case 'timestamp':
+                    $ts = (int) $item['raw'];
+                    $item['view'] = ['text' => $ts > 0 ? date('d.m.Y H:i', $ts) : '–', 'icon' => '', 'state' => ''];
+                    break;
+                default:
+                    $text = trim((string) $item['raw']);
+                    $item['view'] = ['text' => $text !== '' ? $text : '–', 'icon' => '', 'state' => ''];
+            }
+            unset($item['raw']);
+        }
+        unset($item);
+        $d['alerts'] = $alerts;
+
+        if ($d['battery'] !== null) {
+            $b = &$d['battery'];
+            $b['text']    = $b['warning'] ? $b['count'] . ' ' . $this->Translate('schwach') : 'OK';
+            $b['icon']    = $b['warning'] ? '🪫' : '🔋';
+            $b['state']   = $b['warning'] ? 'warn' : 'ok';
+            $b['showBox'] = $b['warning'] && strpos($b['box'], 'Keine Komponenten') === false;
+            unset($b);
+        }
+        if ($d['siren'] !== null) {
+            foreach (['acoustic', 'optical'] as $ch) {
+                $on = $d['siren'][$ch];
+                $d['siren'][$ch] = $on === null ? null : ['on' => $on, 'text' => $this->Translate($on ? 'Aktiv' : 'Inaktiv'), 'icon' => $on ? '🔊' : '🔇'];
+            }
+        }
+        return $d;
+    }
 
     private function buildDashboardHTML(): string
     {
-        $d = $this->collectData();
+        $d    = $this->decorate($this->collectData());
+        $body = '';
 
-        $alertNames = [];
-        foreach ($d['items'] as $item) {
-            if ($item['type'] === 'alarm' && $item['bool'] === true) {
-                $alertNames[] = $item['name'];
+        // Aktiver Alarm: eine rote, pulsierende Kachel ueber die volle Breite – bewusst die einzige Breitkachel.
+        $alertText = count($d['alerts']) > 0 ? '🚨 ' . $this->Translate('ALARM') . ': ' . implode(', ', $d['alerts']) : '';
+        $body .= '<div id="alarm_banner" class="tk-tile tk-is-alarm tk-full alarm-banner"' . ($alertText === '' ? ' hidden' : '') . '>'
+            . '<span id="alarm_banner_val" class="tk-status">' . self::tkEsc($alertText) . '</span></div>';
+
+        if (count($d['items']) > 0) {
+            $body .= self::tkGroup($this->Translate('Status'));
+            foreach ($d['items'] as $item) {
+                $v = $item['view'];
+                $body .= $item['type'] === 'arm'
+                    ? self::tkToggleTile($item['ident'], $item['name'], $v['on'], $v['text'], $v['icon'])
+                    : self::tkStatusTile($item['ident'], $item['name'], $v['text'], $v['icon'], $v['state']);
             }
         }
 
-        $alarmBanner = $this->renderAlarmBanner($alertNames);
-
-        $itemsHtml = '';
-        foreach ($d['items'] as $item) {
-            $itemsHtml .= $this->renderStatusItem($item);
+        if ($d['siren'] !== null) {
+            $body .= self::tkGroup($this->Translate('Sirene'));
+            foreach (['acoustic' => 'Akustisch', 'optical' => 'Optisch'] as $ch => $label) {
+                $c = $d['siren'][$ch];
+                if ($c !== null) {
+                    $body .= self::tkToggleTile('siren_' . $ch, $this->Translate($label), $c['on'], $c['text'], $c['icon'], $c['on'] ? 'tk-is-alarm siren-on' : '');
+                }
+            }
         }
-        $itemsBlock = $itemsHtml !== ''
-            ? '<div class="pv-block"><div class="pv-title">🛡️ ' . $this->Translate('Status') . '</div><div id="items-grid" class="current-grid">' . $itemsHtml . '</div></div>'
-            : '';
 
-        $batteryBlock = $this->renderBatteryPanel($d['battery']);
-        $sirenBlock   = $this->renderSirenPanel($d['siren']);
+        if ($d['battery'] !== null) {
+            $b     = $d['battery'];
+            $body .= self::tkGroup($this->Translate('Batterien'));
+            $body .= self::tkStatusTile('battery', $this->Translate('Status'), $b['text'], $b['icon'], $b['state']);
+            $body .= self::tkActionTile('battery_rescan', 'battery_rescan', $this->Translate('Jetzt prüfen'), '🔄');
+            $body .= '<div id="battery_box_wrap" class="tk-full"' . ($b['showBox'] ? '' : ' hidden') . '>'
+                . self::tkHtmlTile('battery_box', $this->Translate('Schwache Batterien'), $b['box']) . '</div>';
+        }
 
-        $updatedEsc = htmlspecialchars($d['updated'], ENT_QUOTES);
-        $initJson = json_encode($d);
-
-        return <<<HTML
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-html{height:100%}
-*{box-sizing:border-box;margin:0;padding:0}
-body{overflow-y:auto;overflow-x:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;background:#0d1b2a;color:#d0e8ff;display:flex;flex-direction:column;padding:10px;gap:10px}
-.header{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:14px;font-weight:600;border-bottom:1px solid #1e3a5f;padding-bottom:6px;flex:none}
-.updated{font-size:10px;color:#3a5a7a;font-weight:400}
-.badge{padding:3px 8px;border-radius:12px;font-size:12px;border:1px solid transparent;white-space:nowrap}
-.badge-off{background:#1a2535;border-color:#2a3a50;color:#4a6a8a}
-.badge-on{background:#12405a;border-color:#2a7aa0;color:#7ec8f0}
-.badge-warn{background:#4a2010;border-color:#8a4020;color:#f08060}
-.current-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;flex:none}
-.cur-tile{display:flex;flex-direction:column;gap:3px;background:#131f33;border-radius:8px;padding:6px 8px}
-.cur-label{font-size:10px;color:#4a6a8a;text-transform:uppercase;letter-spacing:.03em}
-.cur-value{font-size:15px;font-weight:700;color:#d0e8ff}
-.pv-block{display:flex;flex-direction:column;gap:8px;flex:none;background:#0f1c30;border-radius:10px;padding:8px}
-.pv-title{font-size:12px;font-weight:700;color:#d0e8ff}
-/* Klickbare Statuspunkte (Scharf/Unscharf, Sirenenkanaele): die ganze Kachel ist der Button, kein eingebetteter Zweit-Schalter. */
-.cur-tile.clickable{cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;transition:background-color .15s,transform .08s;border:1px solid #1e3a5f}
-.cur-tile.clickable:active{transform:scale(.97)}
-.cur-tile.on{background:#1a3448;border-color:#2a7aa0}
-.alarm-banner{background:#5a1010;border:1px solid #b03030;color:#ffb0a0;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:700;flex:none;animation:alarm-pulse 1.4s ease-in-out infinite}
-@keyframes alarm-pulse{0%,100%{opacity:1}50%{opacity:.7}}
-.siren-on{background:#5a1010;animation:alarm-pulse 1.4s ease-in-out infinite}
-.battery-box table{width:100%;border-collapse:collapse;font-size:11px;color:#8aa8c8}
-.battery-box th,.battery-box td{text-align:left;padding:2px 4px}
-</style>
-</head>
-<body>
-<div class="header">
-  <span>🚨 {$this->Translate('Alarm')} <span id="updated" class="updated">{$this->Translate('Stand')} {$updatedEsc}</span></span>
-</div>
-
-<div id="alarm-banner-wrap">{$alarmBanner}</div>
-{$itemsBlock}
-{$sirenBlock}
-{$batteryBlock}
-
-<script>
-var state = {$initJson};
-var i18n = {
-  alarm: {$this->jsStr($this->Translate('ALARM'))},
-  ok: 'OK',
-  offen: {$this->jsStr($this->Translate('Offen'))},
-  geschlossen: {$this->jsStr($this->Translate('Geschlossen'))},
-  scharf: {$this->jsStr($this->Translate('Scharf'))},
-  unscharf: {$this->jsStr($this->Translate('Unscharf'))},
-  sirenOn: {$this->jsStr($this->Translate('Aktiv'))},
-  sirenOff: {$this->jsStr($this->Translate('Inaktiv'))}
-};
-
-function setText(id, text) {
-  var el = document.getElementById(id);
-  if (el) el.textContent = text;
+        $css = <<<'CSS'
+.alarm-banner{animation:tk-pulse 1.4s ease-in-out infinite}
+.alarm-banner .tk-status{font-size:var(--tk-fs-text)}
+.siren-on{animation:tk-pulse 1.4s ease-in-out infinite}
+@keyframes tk-pulse{0%,100%{opacity:1}50%{opacity:.72}}
+[hidden]{display:none !important}
+CSS;
+        $js = <<<'JS'
+var states = ['ok', 'warn', 'alarm'];
+function setState(ident, st) {
+  var card = tk.el(ident + '_card'), el = tk.el(ident + '_status');
+  if (card) { card.classList.toggle('tk-is-alarm', st === 'alarm'); card.classList.toggle('tk-is-warn', st === 'warn'); }
+  if (el) states.forEach(function (s) { el.classList.toggle('tk-' + s, s === st); });
 }
-
-function escapeHtml(s) {
-  var d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-function updateBanner(items) {
-  var names = [];
-  for (var i = 0; i < items.length; i++) {
-    if (items[i].type === 'alarm' && items[i].bool === true) names.push(items[i].name);
+var lastBox = state && state.battery ? state.battery.box : '';
+tk.on('__all__', function (v) {
+  state = v;
+  var banner = tk.el('alarm_banner');
+  if (banner) { banner.hidden = v.alerts.length === 0; tk.setText('alarm_banner_val', v.alerts.length ? '🚨 ALARM: ' + v.alerts.join(', ') : ''); }
+  v.items.forEach(function (it) {
+    tk.setText(it.ident + '_val', it.view.text);
+    tk.setText(it.ident + '_icon', it.view.icon);
+    if (it.type === 'arm') tk.setOn(it.ident + '_card', it.view.on); else setState(it.ident, it.view.state);
+  });
+  if (v.siren) ['acoustic', 'optical'].forEach(function (ch) {
+    var c = v.siren[ch]; if (!c) return;
+    var id = 'siren_' + ch;
+    tk.setOn(id + '_card', c.on); tk.setClass(id + '_card', 'tk-is-alarm', c.on); tk.setClass(id + '_card', 'siren-on', c.on);
+    tk.setText(id + '_val', c.text); tk.setText(id + '_icon', c.icon);
+  });
+  if (v.battery) {
+    tk.setText('battery_val', v.battery.text); tk.setText('battery_icon', v.battery.icon); setState('battery', v.battery.state);
+    var wrap = tk.el('battery_box_wrap'); if (wrap) wrap.hidden = !v.battery.showBox;
+    var f = tk.el('battery_box_frame');
+    if (f && v.battery.box !== lastBox) { lastBox = v.battery.box; f.srcdoc = f.srcdoc.replace(/<\/style>[\s\S]*$/, '</style>') + v.battery.box; }
   }
-  var wrap = document.getElementById('alarm-banner-wrap');
-  if (!wrap) return;
-  wrap.innerHTML = names.length > 0
-    ? '<div class="alarm-banner">🚨 ' + i18n.alarm + ': ' + escapeHtml(names.join(', ')) + '</div>'
-    : '';
-}
-
-function toggleCurTile(ident) {
-  var input = document.getElementById(ident + '_input');
-  var card = document.getElementById(ident);
-  var next = input ? !input.checked : true;
-  if (input) input.checked = next;
-  if (card) card.classList.toggle('on', next);
-  requestAction(ident, next);
-}
-
-function updateItem(item) {
-  if (item.type === 'arm') {
-    var icon = item.bool ? '🔒' : '🔓';
-    setText(item.ident + '_text', icon + ' ' + (item.bool ? i18n.scharf : i18n.unscharf));
-    var input = document.getElementById(item.ident + '_input');
-    if (input) input.checked = !!item.bool;
-    var card = document.getElementById(item.ident);
-    if (card) card.classList.toggle('on', !!item.bool);
-    return;
-  }
-  if (item.type === 'alarm' || item.type === 'window') {
-    var badge = document.getElementById(item.ident + '_badge');
-    if (!badge) return;
-    var on = item.bool === true;
-    badge.style.color = on ? '#f08060' : '#4a6a8a';
-    if (item.type === 'alarm') {
-      badge.textContent = (on ? '🚨 ' : '🔕 ') + (on ? i18n.alarm : i18n.ok);
-    } else {
-      badge.textContent = (on ? '🔓 ' : '🔒 ') + (on ? i18n.offen : i18n.geschlossen);
-    }
-    return;
-  }
-  // timestamp/text: reines Anzeigefeld, unveraendert seit Erstrender ok
-}
-
-function setSirenChannel(ident, on) {
-  var tile = document.getElementById(ident);
-  if (!tile) return;
-  tile.classList.toggle('siren-on', on === true);
-  tile.classList.toggle('on', on === true);
-  setText(ident + '_text', (on ? '🔊 ' : '🔇 ') + (on ? i18n.sirenOn : i18n.sirenOff));
-  var input = document.getElementById(ident + '_input');
-  if (input) input.checked = on === true;
-}
-
-function updateSiren(siren) {
-  if (!siren) return;
-  if (siren.acoustic !== null) setSirenChannel('siren_acoustic', siren.acoustic);
-  if (siren.optical !== null) setSirenChannel('siren_optical', siren.optical);
-}
-
-window.handleMessage = function(raw) {
-  var msg = JSON.parse(raw);
-  if (msg.key !== '__all__') return;
-  var val = msg.value;
-  state = val;
-  setText('updated', val.updated);
-  updateBanner(val.items);
-  for (var i = 0; i < val.items.length; i++) {
-    updateItem(val.items[i]);
-  }
-  updateSiren(val.siren);
-};
-</script>
-</body>
-</html>
-HTML;
-    }
-
-    private function renderStatusItem(array $item): string
-    {
-        $nameEsc = htmlspecialchars($item['name'], ENT_QUOTES);
-
-        $identEsc = htmlspecialchars($item['ident'], ENT_QUOTES);
-
-        switch ($item['type']) {
-            case 'arm':
-                $on = $item['bool'] === true;
-                $checked = $on ? ' checked' : '';
-                $onClass = $on ? ' on' : '';
-                $icon = $on ? '🔒' : '🔓';
-                $text = $on ? $this->Translate('Scharf') : $this->Translate('Unscharf');
-                return <<<HTML
-<div id='{$identEsc}' class='cur-tile clickable{$onClass}' onclick="toggleCurTile('{$item['ident']}')">
-  <span class='cur-label'>{$nameEsc}</span>
-  <span id='{$identEsc}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
-  <input id='{$identEsc}_input' type="checkbox"{$checked} style="display:none">
-</div>
-HTML;
-            case 'alarm':
-                $on = $item['bool'] === true;
-                $color = $on ? '#f08060' : '#4a6a8a';
-                $icon = $on ? '🚨' : '🔕';
-                $text = $on ? $this->Translate('ALARM') : 'OK';
-                return $this->renderBadgeTile($identEsc, $nameEsc, $color, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
-            case 'window':
-                $on = $item['bool'] === true;
-                $color = $on ? '#f08060' : '#4a6a8a';
-                $icon = $on ? '🔓' : '🔒';
-                $text = $on ? $this->Translate('Offen') : $this->Translate('Geschlossen');
-                return $this->renderBadgeTile($identEsc, $nameEsc, $color, $icon . ' ' . htmlspecialchars($text, ENT_QUOTES));
-            case 'timestamp':
-                $ts = (int) $item['raw'];
-                $text = $ts > 0 ? date('d.m.Y H:i', $ts) : '–';
-                return $this->renderValueTile($nameEsc, htmlspecialchars($text, ENT_QUOTES));
-            default:
-                $text = trim((string) $item['raw']);
-                return $this->renderValueTile($nameEsc, htmlspecialchars($text !== '' ? $text : '–', ENT_QUOTES));
-        }
-    }
-
-    private function renderBadgeTile(string $identEsc, string $nameEsc, string $color, string $textEsc): string
-    {
-        return "<div id='{$identEsc}' class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span id='{$identEsc}_badge' class='cur-value' style='color:{$color}'>{$textEsc}</span></div>";
-    }
-
-    private function renderAlarmBanner(array $alertNames): string
-    {
-        if (count($alertNames) === 0) {
-            return '';
-        }
-        $namesEsc = htmlspecialchars(implode(', ', $alertNames), ENT_QUOTES);
-        return '<div class="alarm-banner">🚨 ' . $this->Translate('ALARM') . ': ' . $namesEsc . '</div>';
-    }
-
-    /** Encodes a translated string for safe embedding as a JS literal. */
-    private function jsStr(string $s): string
-    {
-        return json_encode($s, JSON_UNESCAPED_UNICODE);
-    }
-
-    private function renderValueTile(string $nameEsc, string $valueEsc): string
-    {
-        return "<div class='cur-tile'><span class='cur-label'>{$nameEsc}</span><span class='cur-value'>{$valueEsc}</span></div>";
-    }
-
-    private function renderBatteryPanel(?array $battery): string
-    {
-        if ($battery === null) {
-            return '';
-        }
-
-        $statusColor = $battery['warning'] ? '#f08060' : '#4a6a8a';
-        $statusIcon  = $battery['warning'] ? '🪫' : '🔋';
-        $statusText  = $battery['warning']
-            ? htmlspecialchars($battery['count'] . ' ' . $this->Translate('schwach'), ENT_QUOTES)
-            : 'OK';
-
-        $boxHtml = '';
-        if ($battery['warning'] && strpos($battery['box'], 'Keine Komponenten') === false) {
-            $boxHtml = '<div class="battery-box">' . $battery['box'] . '</div>';
-        }
-
-        $rescanLabel = $this->Translate('Jetzt prüfen');
-
-        return <<<HTML
-<div class="pv-block">
-  <div class="pv-title">🔋 {$this->Translate('Batterien')}</div>
-  <div class="current-grid">
-    <div id="battery_status" class="cur-tile"><span class="cur-label">{$this->Translate('Status')}</span><span id="battery_status_val" class="cur-value" style="color:{$statusColor}">{$statusIcon} {$statusText}</span></div>
-    <div class="cur-tile clickable" onclick="requestAction('battery_rescan', 1)"><span class="cur-label">{$this->Translate('Aktion')}</span><span class="cur-value">🔄 {$rescanLabel}</span></div>
-  </div>
-  {$boxHtml}
-</div>
-HTML;
-    }
-
-    private function renderSirenPanel(?array $siren): string
-    {
-        if ($siren === null) {
-            return '';
-        }
-
-        $rows = '';
-        if ($siren['acoustic'] !== null) {
-            $rows .= $this->renderSirenChannel('siren_acoustic', $this->Translate('Akustisch'), $siren['acoustic']);
-        }
-        if ($siren['optical'] !== null) {
-            $rows .= $this->renderSirenChannel('siren_optical', $this->Translate('Optisch'), $siren['optical']);
-        }
-        if ($rows === '') {
-            return '';
-        }
-
-        return <<<HTML
-<div class="pv-block">
-  <div class="pv-title">🔊 {$this->Translate('Sirene')}</div>
-  <div class="current-grid">{$rows}</div>
-</div>
-HTML;
-    }
-
-    private function renderSirenChannel(string $ident, string $nameEsc, bool $on): string
-    {
-        $checked = $on ? ' checked' : '';
-        $icon    = $on ? '🔊' : '🔇';
-        $text    = $on ? $this->Translate('Aktiv') : $this->Translate('Inaktiv');
-        $tileCls = $on ? 'cur-tile clickable siren-on on' : 'cur-tile clickable';
-        return <<<HTML
-<div id='{$ident}' class='{$tileCls}' onclick="toggleCurTile('{$ident}')">
-  <span class='cur-label'>{$nameEsc}</span>
-  <span id='{$ident}_text' class='cur-value' style="font-size:12px">{$icon} {$text}</span>
-  <input id='{$ident}_input' type="checkbox"{$checked} style="display:none">
-</div>
-HTML;
+});
+JS;
+        return $this->tkPage($this->Translate('Alarm'), '🚨', $d['updated'], "<div class=\"tk-grid\">{$body}</div>", $css, $js, json_encode($d));
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
-
-    private function pushValue(string $key, $value): void
-    {
-        $this->UpdateVisualizationValue(json_encode(['key' => $key, 'value' => $value]));
-    }
 
     private function readVarById(int $id)
     {
