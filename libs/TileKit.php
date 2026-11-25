@@ -128,8 +128,11 @@ button,input,select{font:inherit;color:inherit}
 .tk-range{-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;cursor:pointer;touch-action:pan-y}
 .tk-range::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--tk-border)}
 .tk-range::-moz-range-track{height:6px;border-radius:3px;background:var(--tk-border)}
+.tk-on .tk-range::-webkit-slider-runnable-track{background:rgba(13,27,42,.7)}
+.tk-on .tk-range::-moz-range-track{background:rgba(13,27,42,.7)}
 .tk-range::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;margin-top:-6px;border-radius:50%;background:var(--tk-accent);border:2px solid var(--tk-bg)}
 .tk-range::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--tk-accent);border:2px solid var(--tk-bg)}
+select.tk-select{width:100%;background:var(--tk-surface-2);border:1px solid var(--tk-border);border-radius:7px;padding:8px;font-size:var(--tk-fs-label);color:var(--tk-text)}
 .tk-step{display:flex;align-items:center;gap:6px}
 .tk-step button{width:30px;height:30px;flex:none;border-radius:8px;background:var(--tk-surface-2);border:1px solid var(--tk-border);font-size:16px;color:var(--tk-accent);cursor:pointer}
 .tk-step button:active{background:var(--tk-press)}
@@ -206,9 +209,9 @@ JS;
      * Nicht schaltbarer Zustand (Ja/Nein, Text). $state: '' | 'ok' | 'warn' | 'alarm'
      * – 'alarm' faerbt die ganze Kachel, sonst nur den Status-Text.
      */
-    protected static function tkStatusTile(string $ident, string $name, string $text, string $icon = '', string $state = '', ?string $color = null, string $sub = ''): string
+    protected static function tkStatusTile(string $ident, string $name, string $text, string $icon = '', string $state = '', ?string $color = null, string $sub = '', string $extraClass = ''): string
     {
-        $cls   = $state === 'alarm' ? ' tk-is-alarm' : ($state === 'warn' ? ' tk-is-warn' : '');
+        $cls   = ($state === 'alarm' ? ' tk-is-alarm' : ($state === 'warn' ? ' tk-is-warn' : '')) . ($extraClass !== '' ? ' ' . $extraClass : '');
         $tcls  = $state !== '' ? ' tk-' . $state : '';
         $style = $color !== null && $color !== '' ? " style=\"color:{$color}\"" : '';
         $subHtml = $sub !== '' ? "<span id=\"{$ident}_sub\" class=\"tk-sub\">" . self::tkEsc($sub) . '</span>' : '';
